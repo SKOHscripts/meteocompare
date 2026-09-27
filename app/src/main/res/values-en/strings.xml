@@ -854,4 +854,37 @@
     <string name="home_temperature_trend_rising">Temperature trend: rising toward %1$d°</string>
     <string name="home_temperature_trend_falling">Temperature trend: falling toward %1$d°</string>
     <string name="home_temperature_trend_stable">Temperature trend: stable around %1$d°</string>
+
+    <!-- Notifications météo locales -->
+    <string name="settings_notifications_title">Notifications</string>
+    <string name="settings_notifications_desc">Computed on the device from your models and forecast engine, with no server or account. Forecasts are refreshed at the interval chosen above.</string>
+    <string name="settings_notifications_daily">Daily summary</string>
+    <string name="settings_notifications_daily_desc">Every day at the chosen time: the current day, or the next day after 3 pm.</string>
+    <string name="settings_notifications_daily_time">Summary time: %1$s</string>
+    <string name="settings_notifications_time_confirm">OK</string>
+    <string name="settings_notifications_divergence">Model divergence</string>
+    <string name="settings_notifications_divergence_desc" formatted="false">When model convergence drops below 50% for today or tomorrow.</string>
+    <string name="settings_notifications_change">Forecast change</string>
+    <string name="settings_notifications_change_desc">When the forecast is clearly revised for the next three days (same signal as “Key points”).</string>
+    <string name="settings_notifications_cities">Followed cities</string>
+    <string name="settings_notifications_no_city">Add a favourite city to receive notifications.</string>
+    <string name="settings_notifications_blocked">MeteoCompare notifications are disabled on this device.</string>
+    <string name="settings_notifications_open_system">Allow</string>
+    <string name="notification_channel_daily">Daily summary</string>
+    <string name="notification_channel_daily_desc">Summary of the day for followed cities, at the chosen time.</string>
+    <string name="notification_channel_divergence">Model divergence</string>
+    <string name="notification_channel_divergence_desc">When models clearly disagree for today or tomorrow.</string>
+    <string name="notification_channel_change">Forecast change</string>
+    <string name="notification_channel_change_desc">When the forecast is clearly revised.</string>
+    <string name="notification_daily_title_today">%1$s · today</string>
+    <string name="notification_daily_title_tomorrow">%1$s · tomorrow</string>
+    <string name="notification_daily_temperatures">%1$s / %2$s</string>
+    <string name="notification_daily_precipitation">Rain %1$d%%</string>
+    <string name="notification_daily_precipitation_with_amount">Rain %1$d%% (%2$s mm)</string>
+    <string name="notification_daily_precipitation_amount">Rain %1$s mm</string>
+    <string name="notification_divergence_title">%1$s: models disagree</string>
+    <string name="notification_divergence_text_today">Today, model convergence is only %1$d%%: the forecast remains uncertain.</string>
+    <string name="notification_divergence_text_tomorrow">Tomorrow, model convergence is only %1$d%%: the forecast remains uncertain.</string>
+    <string name="notification_change_title">%1$s: the forecast is changing</string>
+    <string name="notification_change_text">%1$s (%2$s). %3$s</string>
 </resources>
