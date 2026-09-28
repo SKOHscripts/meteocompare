@@ -53,10 +53,11 @@ jobs:
           echo "apksigner : $apksigner"
           "$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/certs.txt"
           cat "$RUNNER_TEMP/certs.txt"
-          # Selon la version d'apksigner : « Signer #1 certificate… » ou
-          # « Signer (minSdkVersion=…, …) certificate… ».
+          # Le préfixe varie selon la version d'apksigner : « Signer #1 »,
+          # « Signer (minSdkVersion=…) », « V2 Signer: »… Tous les signataires
+          # listés doivent porter la clé de test.
           expected="$(tr -d '[:space:]' < .github/test-signing/certificate-sha256.txt)"
-          actual="$(sed -n 's/^Signer.* certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | sort -u)"
+          actual="$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | sort -u)"
           if [ "$actual" != "$expected" ]; then
             echo "Signature inattendue : « $actual » (attendu : $expected)" >&2
             exit 1
