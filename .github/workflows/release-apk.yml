@@ -8,6 +8,9 @@
 # release/all-fixes est la branche unique qui cumule toutes les corrections
 # proposées à l'auteur ; chaque push y produit aussi l'APK en artefact.
 #
+# L'APK debug est signé avec la clé de test versionnée dans
+# .github/test-signing/ : chaque build de test met à jour le précédent.
+#
 # Le préfixe « skoh- » évite de déclencher le workflow F-Droid de l'auteur
 # (tags v*). Présent uniquement sur les branches release du fork, jamais
 # dans les branches proposées en PR.
@@ -40,6 +43,20 @@ jobs:
 
       - name: APK debug
         run: bash ./gradlew --no-daemon :app:assembleDebug
+
+      # Un APK signé avec une autre clé ne pourrait pas mettre à jour le build
+      # de test installé : on refuse de le publier.
+      - name: Vérifier la signature de test
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          expected="$(tr -d '[:space:]' < .github/test-signing/certificate-sha256.txt)"
+          actual="$("$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          echo "Certificat : $actual"
+          if [ "$actual" != "$expected" ]; then
+            echo "Signature inattendue (attendu : $expected)" >&2
+            exit 1
+          fi
 
       - name: Version
         id: version

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Build de test du fork : nom distinct de l'application officielle installée à côté. -->
+<resources>
+    <string name="app_name">MeteoCompare test</string>
+</resources>
