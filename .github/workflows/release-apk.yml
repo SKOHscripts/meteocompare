@@ -5,6 +5,9 @@
 # les notes .github/release-notes/<version>.md. Pour publier un nouveau
 # build de test : incrémenter la version dans ce fichier et pousser.
 #
+# release/all-fixes est la branche unique qui cumule toutes les corrections
+# proposées à l'auteur ; chaque push y produit aussi l'APK en artefact.
+#
 # Le préfixe « skoh- » évite de déclencher le workflow F-Droid de l'auteur
 # (tags v*). Présent uniquement sur les branches release du fork, jamais
 # dans les branches proposées en PR.
@@ -68,6 +71,13 @@ jobs:
           name: ${{ steps.apk.outputs.name }}
           path: ${{ steps.apk.outputs.name }}*
           retention-days: 30
+
+      # Ancienne pré-release glissante de la branche test/all-fixes, supprimée
+      # au profit de cette branche unique. Sans effet si elle n'existe plus.
+      - name: Nettoyer l'ancienne pré-release test-build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete test-build --yes --cleanup-tag || true
 
       - name: Publier la pré-release
         if: steps.version.outputs.exists == 'false'
