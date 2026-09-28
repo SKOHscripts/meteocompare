@@ -1,16 +1,19 @@
-# Release de test du fork : pour chaque tag skoh-v*, compile l'APK debug
-# après la suite de tests JVM et publie une pré-release GitHub versionnée
-# avec les notes .github/release-notes/<tag>.md.
+# Release de test du fork : à chaque push sur une branche release/**,
+# compile l'APK debug après la suite de tests JVM. Si la version indiquée
+# dans .github/release-version n'a pas encore de release, le workflow crée
+# le tag correspondant sur ce commit et publie une pré-release GitHub avec
+# les notes .github/release-notes/<version>.md. Pour publier un nouveau
+# build de test : incrémenter la version dans ce fichier et pousser.
 #
 # Le préfixe « skoh- » évite de déclencher le workflow F-Droid de l'auteur
-# (tags v*). Présent uniquement sur les branches release/test du fork,
-# jamais dans les branches proposées en PR.
+# (tags v*). Présent uniquement sur les branches release du fork, jamais
+# dans les branches proposées en PR.
 name: Release de test (fork)
 
 on:
   push:
-    tags:
-      - 'skoh-v*'
+    branches:
+      - 'release/**'
 
 permissions:
   contents: write
@@ -35,23 +38,48 @@ jobs:
       - name: APK debug
         run: bash ./gradlew --no-daemon :app:assembleDebug
 
+      - name: Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(tr -d '[:space:]' < .github/release-version)"
+          case "$tag" in skoh-v*) ;; *) echo "Version invalide : $tag" >&2; exit 1 ;; esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "La release $tag existe déjà : build vérifié, rien n'est publié."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Préparer l'APK
         id: apk
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          name="meteocompare-${GITHUB_REF_NAME}.apk"
+          name="meteocompare-${TAG}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$name"
           sha256sum "$name" > "$name.sha256"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.name }}*
+          retention-days: 30
+
       - name: Publier la pré-release
+        if: steps.version.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           APK: ${{ steps.apk.outputs.name }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          notes=".github/release-notes/${TAG}.md"
           if [ -f "$notes" ]; then notes_args=(--notes-file "$notes"); else notes_args=(--generate-notes); fi
-          gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" \
+          gh release create "$TAG" "$APK" "$APK.sha256" \
             --prerelease \
-            --verify-tag \
-            --title "MeteoCompare ${GITHUB_REF_NAME#skoh-v} — build de test" \
+            --target "$GITHUB_SHA" \
+            --title "MeteoCompare ${TAG#skoh-v} — build de test" \
             "${notes_args[@]}"
