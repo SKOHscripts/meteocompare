@@ -48,7 +48,7 @@
     <string name="open_meteo_link_label">Open-Meteo-Lizenz</string>
     <string name="widget_open_meteo_attribution">Open-Meteo · CC BY 4.0</string>
     <string name="widget_open_meteo_attribution_short">Open-Meteo</string>
-    <string name="settings_about_models_credit">Modelle: AROME und ARPEGE von Météo-France, ICON vom DWD, GFS und HRRR von NOAA, ECMWF und AIFS vom Europäischen Zentrum, UKMO vom UK Met Office, GEM von Environment Canada, MET Nordic von MET Norway, HARMONIE von KNMI und DMI, ICON-CH von MeteoSwiss, ACCESS vom Bureau of Meteorology (Australien), GRAPES von CMA (China).</string>
+    <string name="settings_about_models_credit">Modelle: AROME und ARPEGE von Météo-France, ICON vom DWD, GFS und HRRR von NOAA, ECMWF und AIFS vom Europäischen Zentrum, UKMO vom UK Met Office, GEM von Environment Canada, MET Nordic von MET Norway, HARMONIE von KNMI und DMI, ICON-CH von MeteoSwiss, ACCESS vom Bureau of Meteorology (Australien), GRAPES von CMA (China), WeatherNext 2 von Google DeepMind.</string>
     <string name="settings_bias_refresh_title">Bias-Verfolgung</string>
     <string name="settings_bias_refresh_desc">Lädt bis zu 3 Wochen D+1-Verlauf für die lokale Zuverlässigkeit. Modelle ohne Archiv kalibrieren sich schrittweise.</string>
     <string name="settings_bias_refresh_action">Initialisieren oder aktualisieren</string>
@@ -315,7 +315,11 @@ Daten</string>
     <string name="bias_sheet_title_prefix">Mittlere Abweichung </string>
     <string name="bias_sheet_title_suffix"> gegenüber der historischen Referenz.</string>
 
-    <string name="bias_history_collecting">Der D+1-Verlauf wird gesammelt. Modellbezogene Indikatoren erscheinen nach 14 übereinstimmenden Tagen.</string>
+    <string name="bias_history_preparing">Lokale Zuverlässigkeit wird vorbereitet. Jeden Tag wird die am Vortag (D+1) ausgegebene Prognose jedes Modells mit einer Reanalyse verglichen. Seine Indikatoren erscheinen nach %1$d verglichenen Tagen; der Zähler unter seinem Namen zeigt den Fortschritt.</string>
+    <string name="bias_history_partial">Zuverlässigkeitsindikatoren für %1$d von %2$d Modellen verfügbar. Die übrigen werden täglich ergänzt; der Zähler unter ihrem Namen zeigt den Fortschritt.</string>
+    <string name="bias_history_best_progress">Am weitesten fortgeschrittenes Modell: %1$d/%2$d verglichene Tage.</string>
+    <string name="bias_history_fetch_action">Verlauf jetzt abrufen</string>
+    <string name="bias_history_fetch_requested">Abruf läuft im Hintergrund…</string>
 
     <string name="bias_chip_calibrating_content_description">Bias-Verfolgung für dieses Modell läuft: Es liegen noch nicht genügend historische Daten zur Beurteilung seiner Genauigkeit vor.</string>
 
@@ -837,4 +841,37 @@ Daten</string>
     <string name="home_temperature_trend_rising">Temperaturtrend: steigend auf %1$d°</string>
     <string name="home_temperature_trend_falling">Temperaturtrend: fallend auf %1$d°</string>
     <string name="home_temperature_trend_stable">Temperaturtrend: stabil um %1$d°</string>
+
+    <!-- Notifications météo locales -->
+    <string name="settings_notifications_title">Benachrichtigungen</string>
+    <string name="settings_notifications_desc">Auf dem Gerät aus Ihren Modellen und Ihrer Prognose-Engine berechnet, ohne Server oder Konto. Die Prognosen werden im oben gewählten Intervall aktualisiert.</string>
+    <string name="settings_notifications_daily">Tägliche Zusammenfassung</string>
+    <string name="settings_notifications_daily_desc">Jeden Tag zur gewählten Uhrzeit: der aktuelle Tag, ab 15 Uhr der nächste Tag.</string>
+    <string name="settings_notifications_daily_time">Uhrzeit der Zusammenfassung: %1$s</string>
+    <string name="settings_notifications_time_confirm">OK</string>
+    <string name="settings_notifications_divergence">Modellabweichung</string>
+    <string name="settings_notifications_divergence_desc" formatted="false">Wenn die Modellkonvergenz für heute oder morgen unter 50 % fällt.</string>
+    <string name="settings_notifications_change">Prognoseänderung</string>
+    <string name="settings_notifications_change_desc">Wenn die Prognose für die nächsten drei Tage deutlich revidiert wird (gleiches Signal wie „Wichtige Punkte“).</string>
+    <string name="settings_notifications_cities">Verfolgte Orte</string>
+    <string name="settings_notifications_no_city">Fügen Sie einen Favoriten hinzu, um Benachrichtigungen zu erhalten.</string>
+    <string name="settings_notifications_blocked">Benachrichtigungen von MeteoCompare sind auf diesem Gerät deaktiviert.</string>
+    <string name="settings_notifications_open_system">Erlauben</string>
+    <string name="notification_channel_daily">Tägliche Zusammenfassung</string>
+    <string name="notification_channel_daily_desc">Zusammenfassung des Tages für die verfolgten Orte zur gewählten Uhrzeit.</string>
+    <string name="notification_channel_divergence">Modellabweichung</string>
+    <string name="notification_channel_divergence_desc">Wenn die Modelle für heute oder morgen deutlich voneinander abweichen.</string>
+    <string name="notification_channel_change">Prognoseänderung</string>
+    <string name="notification_channel_change_desc">Wenn die Prognose deutlich revidiert wird.</string>
+    <string name="notification_daily_title_today">%1$s · heute</string>
+    <string name="notification_daily_title_tomorrow">%1$s · morgen</string>
+    <string name="notification_daily_temperatures">%1$s / %2$s</string>
+    <string name="notification_daily_precipitation">Regen %1$d %%</string>
+    <string name="notification_daily_precipitation_with_amount">Regen %1$d %% (%2$s mm)</string>
+    <string name="notification_daily_precipitation_amount">Regen %1$s mm</string>
+    <string name="notification_divergence_title">%1$s: Modelle weichen ab</string>
+    <string name="notification_divergence_text_today">Heute liegt die Modellkonvergenz nur bei %1$d %%: Die Prognose bleibt unsicher.</string>
+    <string name="notification_divergence_text_tomorrow">Morgen liegt die Modellkonvergenz nur bei %1$d %%: Die Prognose bleibt unsicher.</string>
+    <string name="notification_change_title">%1$s: Die Prognose ändert sich</string>
+    <string name="notification_change_text">%1$s (%2$s). %3$s</string>
 </resources>

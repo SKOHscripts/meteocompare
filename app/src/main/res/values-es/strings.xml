@@ -48,7 +48,7 @@
     <string name="open_meteo_link_label">Licencia de Open-Meteo</string>
     <string name="widget_open_meteo_attribution">Open-Meteo · CC BY 4.0</string>
     <string name="widget_open_meteo_attribution_short">Open-Meteo</string>
-    <string name="settings_about_models_credit">Modelos: AROME y ARPEGE de Météo-France, ICON de DWD, GFS y HRRR de NOAA, ECMWF y AIFS del Centro Europeo, UKMO del UK Met Office, GEM de Environment Canada, MET Nordic de MET Norway, HARMONIE de KNMI y DMI, ICON-CH de MeteoSwiss, ACCESS del Bureau of Meteorology (Australia) y GRAPES de CMA (China).</string>
+    <string name="settings_about_models_credit">Modelos: AROME y ARPEGE de Météo-France, ICON de DWD, GFS y HRRR de NOAA, ECMWF y AIFS del Centro Europeo, UKMO del UK Met Office, GEM de Environment Canada, MET Nordic de MET Norway, HARMONIE de KNMI y DMI, ICON-CH de MeteoSwiss, ACCESS del Bureau of Meteorology (Australia), GRAPES de CMA (China) y WeatherNext 2 de Google DeepMind.</string>
     <string name="settings_bias_refresh_title">Seguimiento del sesgo</string>
     <string name="settings_bias_refresh_desc">Obtiene hasta 3 semanas de historial D+1 para iniciar la fiabilidad local. Los modelos sin archivo se calibran progresivamente.</string>
     <string name="settings_bias_refresh_action">Inicializar o actualizar</string>
@@ -315,7 +315,11 @@ datos</string>
     <string name="bias_sheet_title_prefix">Desviación media </string>
     <string name="bias_sheet_title_suffix"> respecto a la referencia histórica.</string>
 
-    <string name="bias_history_collecting">Se está recopilando el historial D+1. Los indicadores por modelo aparecerán tras 14 días coincidentes.</string>
+    <string name="bias_history_preparing">Fiabilidad local en preparación. Cada día, la previsión emitida la víspera (D+1) por cada modelo se compara con un reanálisis. Sus indicadores aparecen tras %1$d días comparados; el contador bajo su nombre sigue el avance.</string>
+    <string name="bias_history_partial">Indicadores de fiabilidad disponibles para %1$d de %2$d modelos. Los demás se completan cada día; el contador bajo su nombre sigue el avance.</string>
+    <string name="bias_history_best_progress">Modelo más avanzado: %1$d/%2$d días comparados.</string>
+    <string name="bias_history_fetch_action">Recuperar el historial ahora</string>
+    <string name="bias_history_fetch_requested">Recuperación en segundo plano…</string>
 
     <string name="bias_chip_calibrating_content_description">Seguimiento del sesgo en curso para este modelo: aún no hay suficientes datos históricos para evaluar su precisión.</string>
 
@@ -841,4 +845,37 @@ datos</string>
     <string name="home_temperature_trend_rising">Tendencia de temperatura: sube hacia %1$d°</string>
     <string name="home_temperature_trend_falling">Tendencia de temperatura: baja hacia %1$d°</string>
     <string name="home_temperature_trend_stable">Tendencia de temperatura: estable alrededor de %1$d°</string>
+
+    <!-- Notifications météo locales -->
+    <string name="settings_notifications_title">Notificaciones</string>
+    <string name="settings_notifications_desc">Calculadas en el dispositivo a partir de tus modelos y tu motor de previsión, sin servidor ni cuenta. Las previsiones se actualizan con el intervalo elegido arriba.</string>
+    <string name="settings_notifications_daily">Resumen diario</string>
+    <string name="settings_notifications_daily_desc">Cada día a la hora elegida: el día en curso, o el día siguiente a partir de las 15 h.</string>
+    <string name="settings_notifications_daily_time">Hora del resumen: %1$s</string>
+    <string name="settings_notifications_time_confirm">Aceptar</string>
+    <string name="settings_notifications_divergence">Divergencia de modelos</string>
+    <string name="settings_notifications_divergence_desc" formatted="false">Cuando la convergencia de los modelos baja del 50 % para hoy o mañana.</string>
+    <string name="settings_notifications_change">Cambio de previsión</string>
+    <string name="settings_notifications_change_desc">Cuando la previsión se revisa claramente para los próximos tres días (misma señal que «Puntos clave»).</string>
+    <string name="settings_notifications_cities">Ciudades seguidas</string>
+    <string name="settings_notifications_no_city">Añade una ciudad a favoritos para recibir notificaciones.</string>
+    <string name="settings_notifications_blocked">Las notificaciones de MeteoCompare están desactivadas en este dispositivo.</string>
+    <string name="settings_notifications_open_system">Permitir</string>
+    <string name="notification_channel_daily">Resumen diario</string>
+    <string name="notification_channel_daily_desc">Resumen del día para las ciudades seguidas, a la hora elegida.</string>
+    <string name="notification_channel_divergence">Divergencia de modelos</string>
+    <string name="notification_channel_divergence_desc">Cuando los modelos discrepan claramente para hoy o mañana.</string>
+    <string name="notification_channel_change">Cambio de previsión</string>
+    <string name="notification_channel_change_desc">Cuando la previsión se revisa claramente.</string>
+    <string name="notification_daily_title_today">%1$s · hoy</string>
+    <string name="notification_daily_title_tomorrow">%1$s · mañana</string>
+    <string name="notification_daily_temperatures">%1$s / %2$s</string>
+    <string name="notification_daily_precipitation">Lluvia %1$d %%</string>
+    <string name="notification_daily_precipitation_with_amount">Lluvia %1$d %% (%2$s mm)</string>
+    <string name="notification_daily_precipitation_amount">Lluvia %1$s mm</string>
+    <string name="notification_divergence_title">%1$s: los modelos discrepan</string>
+    <string name="notification_divergence_text_today">Hoy, la convergencia de los modelos es solo del %1$d %%: la previsión sigue siendo incierta.</string>
+    <string name="notification_divergence_text_tomorrow">Mañana, la convergencia de los modelos es solo del %1$d %%: la previsión sigue siendo incierta.</string>
+    <string name="notification_change_title">%1$s: la previsión cambia</string>
+    <string name="notification_change_text">%1$s (%2$s). %3$s</string>
 </resources>
