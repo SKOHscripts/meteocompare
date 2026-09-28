@@ -72,12 +72,24 @@ jobs:
           path: ${{ steps.apk.outputs.name }}*
           retention-days: 30
 
-      # Ancienne pré-release glissante de la branche test/all-fixes, supprimée
-      # au profit de cette branche unique. Sans effet si elle n'existe plus.
-      - name: Nettoyer l'ancienne pré-release test-build
+      # Ménage ponctuel du fork : ancienne pré-release test-build et branches
+      # remplacées par release/all-fixes. Une branche n'est supprimée que si
+      # sa tête est encore le commit obsolète connu. Étape retirée ensuite.
+      - name: Nettoyer les anciennes branches de test
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete test-build --yes --cleanup-tag || true
+        run: |
+          gh release delete test-build --yes --cleanup-tag || true
+          delete_if_at() {
+            head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$1" --jq .object.sha 2>/dev/null || true)"
+            if [ "$head" = "$2" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$1" && echo "Branche $1 supprimée"
+            else
+              echo "Branche $1 conservée (tête : ${head:-absente})"
+            fi
+          }
+          delete_if_at test/all-fixes abc764f726d939248888b646df12614468144a29
+          delete_if_at fix/unknown-error-outside-europe 50e9757e5aa6efbb14ec064080e71e85d00be8ac
 
       - name: Publier la pré-release
         if: steps.version.outputs.exists == 'false'
