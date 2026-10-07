@@ -1,0 +1,115 @@
+# Build manuel d'un APK de test, propre au fork.
+#
+# Actions → « APK de test (manuel) » → Run workflow : garder « Use workflow
+# from » sur master, puis saisir la branche du fork à compiler. L'APK debug
+# (paquet com.meteocompare.app.debug) est signé avec la clé de test du fork,
+# injectée au moment du build : la branche compilée n'a besoin ni du
+# keystore ni de modification Gradle, et l'APK met à jour l'app de test déjà
+# installée (à condition que son versionCode ne soit pas inférieur).
+#
+# Résultat : l'APK et son empreinte SHA-256 en artefact du run, sans release.
+#
+# Ce fichier et .github/test-signing/ n'existent que sur le fork : les
+# branches proposées en PR partent du master de l'auteur et ne les
+# contiennent pas.
+name: APK de test (manuel)
+run-name: APK ${{ inputs.branche }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      branche:
+        description: 'Branche du fork à compiler (ex. master, release/all-fixes, feat/weathernext2-model)'
+        required: true
+        default: release/all-fixes
+        type: string
+      tests:
+        description: 'Lancer aussi les tests unitaires (≈ 5 min de plus)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Récupérer la branche à compiler
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branche }}
+
+      # La clé de test vient du commit qui porte ce workflow (master du fork),
+      # pas de la branche compilée.
+      - name: Récupérer la clé de test
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: _ci
+          sparse-checkout: .github/test-signing
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests unitaires
+        if: inputs.tests
+        run: bash ./gradlew --no-daemon :app:testDebugUnitTest
+
+      # android.injected.signing.* remplace la configuration de signature de
+      # la variante compilée, sans toucher au build.gradle.kts de la branche.
+      - name: APK debug signé avec la clé de test
+        run: |
+          bash ./gradlew --no-daemon :app:assembleDebug \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/_ci/.github/test-signing/meteocompare-test.jks" \
+            -Pandroid.injected.signing.store.password=meteocompare-test \
+            -Pandroid.injected.signing.key.alias=meteocompare-test \
+            -Pandroid.injected.signing.key.password=meteocompare-test
+
+      # Un APK signé avec une autre clé ne pourrait pas mettre à jour l'app de
+      # test installée : le run échoue plutôt que de le livrer.
+      - name: Vérifier la signature de test
+        shell: bash
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/certs.txt"
+          cat "$RUNNER_TEMP/certs.txt"
+          # Le préfixe varie selon la version d'apksigner : « Signer #1 »,
+          # « Signer (minSdkVersion=…) », « V2 Signer: »… Tous les signataires
+          # listés doivent porter la clé de test.
+          expected="$(tr -d '[:space:]' < _ci/.github/test-signing/certificate-sha256.txt)"
+          actual="$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | sort -u)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Signature inattendue : « $actual » (attendu : $expected)" >&2
+            exit 1
+          fi
+          echo "Signature de test conforme."
+
+      - name: Préparer l'APK
+        id: apk
+        env:
+          BRANCHE: ${{ inputs.branche }}
+        run: |
+          safe="$(printf '%s' "$BRANCHE" | tr -c 'A-Za-z0-9._-' '-')"
+          name="meteocompare-${safe}-$(git rev-parse --short HEAD)-run${GITHUB_RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$name"
+          sha256sum "$name" > "$name.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          {
+            echo "### APK de test"
+            echo
+            echo "- Branche : \`$BRANCHE\` (\`$(git rev-parse --short HEAD)\`)"
+            echo "- Fichier : \`$name\` (artefact ci-dessous)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.name }}*
+          retention-days: 30
