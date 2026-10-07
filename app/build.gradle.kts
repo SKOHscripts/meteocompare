@@ -31,6 +31,17 @@ val keystoreProperties = Properties().apply {
 fun signingValue(key: String, envKey: String): String? =
     keystoreProperties.getProperty(key) ?: System.getenv(envKey)
 
+// ─── Builds de test du fork (branche release/all-fixes uniquement) ──────────
+//
+// Le keystore de debug par défaut est régénéré sur chaque runner CI : deux APK
+// de test successifs n'ont donc jamais la même signature et Android refuse la
+// mise à jour. Ce keystore dédié, versionné sur la seule branche de test du
+// fork, signe l'APK debug (paquet `.debug`) pour que chaque build de test
+// s'installe par-dessus le précédent en conservant ses données. Il ne signe
+// jamais le paquet de l'application officielle ; son mot de passe est public
+// par construction (voir .github/test-signing/README.md).
+val forkTestKeystore = rootProject.file(".github/test-signing/meteocompare-test.jks")
+
 val vigilanceBaseUrl = providers.gradleProperty("VIGILANCE_BASE_URL")
     .orElse("https://meteocompare.app/")
     .get()
@@ -61,6 +72,14 @@ android {
                 storePassword = signingValue("storePassword", "KEYSTORE_PASSWORD")
                 keyAlias = signingValue("keyAlias", "KEY_ALIAS")
                 keyPassword = signingValue("keyPassword", "KEY_PASSWORD")
+            }
+        }
+        if (forkTestKeystore.exists()) {
+            create("forkTest") {
+                storeFile = forkTestKeystore
+                storePassword = "meteocompare-test"
+                keyAlias = "meteocompare-test"
+                keyPassword = "meteocompare-test"
             }
         }
     }
@@ -111,6 +130,14 @@ android {
 
         debug {
             applicationIdSuffix = ".debug"
+            if (forkTestKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("forkTest")
+                // Numéro du run CI dans Réglages → À propos, pour savoir quel
+                // build de test est installé. Le versionCode reste celui de
+                // l'application : à versionCode égal, Android accepte la mise
+                // à jour.
+                versionNameSuffix = "-test" + (System.getenv("GITHUB_RUN_NUMBER")?.let { ".$it" } ?: "")
+            }
         }
     }
 
