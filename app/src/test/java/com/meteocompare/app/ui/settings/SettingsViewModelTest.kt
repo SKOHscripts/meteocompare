@@ -1,7 +1,11 @@
 package com.meteocompare.app.ui.settings
 
+
 import android.content.Context
+import androidx.work.Operation
 import app.cash.turbine.test
+import com.google.common.util.concurrent.ListenableFuture
+import java.util.concurrent.ExecutionException
 import com.meteocompare.app.R
 import com.meteocompare.app.data.worker.BiasRefreshScheduler
 import com.meteocompare.app.domain.model.City
@@ -9,6 +13,7 @@ import com.meteocompare.app.domain.model.ForecastEngine
 import com.meteocompare.app.domain.model.LanguagePreference
 import com.meteocompare.app.domain.model.NotificationSettings
 import com.meteocompare.app.domain.model.RefreshInterval
+import com.meteocompare.app.domain.model.UnitSystem
 import com.meteocompare.app.domain.model.ThemePreference
 import com.meteocompare.app.domain.model.WeatherModel
 import com.meteocompare.app.domain.repository.CityRepository
@@ -37,6 +42,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -77,6 +84,11 @@ class SettingsViewModelTest {
 
     private val prefs: UserPreferencesRepository = mockk(relaxed = true) {
         coEvery { observeEnabledModels() } returns modelsFlow
+        coEvery { setEnabledModels(any()) } answers {
+            modelsFlow.value = firstArg<List<WeatherModel>>()
+            Unit
+        }
+        every { observeUnitSystem() } returns kotlinx.coroutines.flow.flowOf(UnitSystem.METRIC)
         coEvery { observeThemePreference() } returns themeFlow
         coEvery { observeLanguagePreference() } returns languageFlow
         coEvery { observeRefreshInterval() } returns refreshIntervalFlow
@@ -122,9 +134,9 @@ class SettingsViewModelTest {
         every { WidgetRefreshScheduler.schedule(any<Context>()) } returns Unit
         every { WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>()) } returns Unit
         every { WidgetRefreshScheduler.cancel(any<Context>()) } returns Unit
-        every { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) } returns Unit
+        every { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) } returns enqueueOperation()
         mockkObject(WeatherNotificationScheduler)
-        every { WeatherNotificationScheduler.reschedule(any(), any()) } returns Unit
+        every { WeatherNotificationScheduler.reschedule(any(), any(), any()) } returns Unit
 
         viewModel = SettingsViewModel(appContext, prefs, cityRepository)
     }
@@ -155,72 +167,138 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `onModelToggled - activer un nouveau modèle l'ajoute au set`() = runTest(dispatcher) {
-        // Maintient la souscription pour que enabledModels.value reflète
-        // réellement modelsFlow.value (pas l'initialValue par défaut).
+    fun `onModelToggled - met a jour le brouillon sans persister`() = runTest(dispatcher) {
         backgroundScope.launch { viewModel.enabledModels.collect {} }
         modelsFlow.value = listOf(WeatherModel.GFS)
         viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
 
         viewModel.onModelToggled(WeatherModel.ECMWF, enabled = true)
 
-        coVerify {
-            prefs.setEnabledModels(match {
-                it.toSet() == setOf(WeatherModel.GFS, WeatherModel.ECMWF)
-            })
-        }
+        assertEquals(
+            setOf(WeatherModel.GFS, WeatherModel.ECMWF),
+            viewModel.enabledModels.first { WeatherModel.ECMWF in it }
+        )
+        coVerify(exactly = 0) { prefs.setEnabledModels(any()) }
+        verify(exactly = 0) { WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>()) }
     }
 
     @Test
-    fun `onModelToggled - désactiver un modèle le retire du set`() = runTest(dispatcher) {
-        backgroundScope.launch { viewModel.enabledModels.collect {} }
-        modelsFlow.value = listOf(WeatherModel.GFS, WeatherModel.ECMWF)
-        viewModel.enabledModels.first { it == setOf(WeatherModel.GFS, WeatherModel.ECMWF) }
-
-        viewModel.onModelToggled(WeatherModel.ECMWF, enabled = false)
-
-        coVerify {
-            prefs.setEnabledModels(match { it.toSet() == setOf(WeatherModel.GFS) })
-        }
-    }
-
-    @Test
-    fun `onModelToggled - désactiver le DERNIER modèle est ignoré (jamais set vide)`() =
+    fun `commitModelSelection - persiste une seule fois la selection finale`() =
         runTest(dispatcher) {
             backgroundScope.launch { viewModel.enabledModels.collect {} }
             modelsFlow.value = listOf(WeatherModel.GFS)
             viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
 
-            viewModel.onModelToggled(WeatherModel.GFS, enabled = false)
+            viewModel.onModelToggled(WeatherModel.ECMWF, true)
+            viewModel.onModelToggled(WeatherModel.ICON_GLOBAL, true)
+            viewModel.onModelToggled(WeatherModel.GFS, false)
 
-            // Contrainte métier : la VM refuse de persister un set vide pour
-            // que l'app puisse toujours afficher quelque chose.
+            coVerify(exactly = 0) { prefs.setEnabledModels(any()) }
+            assertEquals(true, viewModel.commitModelSelection())
+
+            coVerify(exactly = 1) {
+                prefs.setEnabledModels(match {
+                    it.toSet() == setOf(WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL)
+                })
+            }
+            verify(exactly = 1) {
+                WidgetRefreshScheduler.triggerImmediateRefresh(appContext)
+            }
+        }
+
+    @Test
+    fun `commitModelSelectionResult - distingue sauvegarde et absence de changement`() =
+        runTest(dispatcher) {
+            backgroundScope.launch { viewModel.enabledModels.collect {} }
+            modelsFlow.value = listOf(WeatherModel.GFS)
+            viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
+
+            assertEquals(
+                ModelSelectionCommitResult.UNCHANGED,
+                viewModel.commitModelSelectionResult()
+            )
+
+            viewModel.onModelToggled(WeatherModel.ECMWF, enabled = true)
+            assertEquals(
+                ModelSelectionCommitResult.SAVED,
+                viewModel.commitModelSelectionResult()
+            )
+        }
+
+    @Test
+    fun `onModelToggled - desactiver le dernier modele est refuse dans le brouillon`() =
+        runTest(dispatcher) {
+            backgroundScope.launch { viewModel.enabledModels.collect {} }
+            modelsFlow.value = listOf(WeatherModel.GFS)
+            viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
+
+            viewModel.feedback.test {
+                viewModel.onModelToggled(WeatherModel.GFS, enabled = false)
+                val event = awaitItem()
+                assertEquals(AppToastType.WARNING, event.type)
+                assertEquals(R.string.settings_models_min_warning, event.messageRes)
+            }
+
+            assertEquals(setOf(WeatherModel.GFS), viewModel.enabledModels.value)
             coVerify(exactly = 0) { prefs.setEnabledModels(any()) }
         }
 
     @Test
-    fun `onModelToggled - preference read failure emits a terminal error toast`() =
+    fun `commitModelSelection - echec de persistance conserve le brouillon et signale erreur`() =
         runTest(dispatcher) {
-            every { prefs.observeEnabledModels() } throws
-                IllegalStateException("datastore unavailable")
+            backgroundScope.launch { viewModel.enabledModels.collect {} }
+            modelsFlow.value = listOf(WeatherModel.GFS)
+            viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
+            viewModel.onModelToggled(WeatherModel.ECMWF, enabled = true)
+            coEvery { prefs.setEnabledModels(any()) } throws IOException("disk unavailable")
 
             viewModel.feedback.test {
-                viewModel.onModelToggled(WeatherModel.ECMWF, enabled = true)
-
+                assertEquals(false, viewModel.commitModelSelection())
                 val event = awaitItem()
                 assertEquals(AppToastType.ERROR, event.type)
                 assertEquals(R.string.toast_settings_save_error, event.messageRes)
             }
-            coVerify(exactly = 0) { prefs.setEnabledModels(any()) }
+
+            assertEquals(
+                setOf(WeatherModel.GFS, WeatherModel.ECMWF),
+                viewModel.enabledModels.value
+            )
+            verify(exactly = 0) { WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>()) }
         }
 
     @Test
-    fun `onBiasRefreshRequested - déclenche uniquement le worker manuel`() {
-        viewModel.onBiasRefreshRequested()
-
-        verify(exactly = 1) {
-            BiasRefreshScheduler.triggerManualRefresh(appContext)
+    fun `onBiasRefreshRequested - déclenche uniquement le worker manuel`() = runTest(dispatcher) {
+        viewModel.feedback.test {
+            viewModel.onBiasRefreshRequested()
+            val event = awaitItem()
+            assertEquals(AppToastType.INFO, event.type)
+            assertEquals(R.string.settings_bias_refresh_queued, event.messageRes)
         }
+        verify(exactly = 1) { BiasRefreshScheduler.triggerManualRefresh(appContext) }
+    }
+
+    @Test
+    fun `onBiasRefreshRequested - un echec asynchrone affiche une erreur`() = runTest(dispatcher) {
+        every { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) } returns
+            enqueueOperation(IllegalStateException("enqueue failed asynchronously"))
+        viewModel.feedback.test {
+            viewModel.onBiasRefreshRequested()
+            val event = awaitItem()
+            assertEquals(AppToastType.ERROR, event.type)
+            assertEquals(R.string.toast_action_error, event.messageRes)
+            expectNoEvents()
+        }
+    }
+
+    private fun enqueueOperation(error: Throwable? = null): Operation {
+        val future = mockk<ListenableFuture<Operation.State.SUCCESS>> {
+            every { isDone } returns true
+            every { get() } answers {
+                if (error != null) throw ExecutionException(error)
+                Operation.SUCCESS
+            }
+        }
+        return mockk { every { result } returns future }
     }
 
     @Test
@@ -257,37 +335,58 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `onModelToggled - séquence de toggles utilise le set actuel à chaque fois`() =
+    fun `onModelToggled - sequence de toggles reste locale jusqu au commit`() =
         runTest(dispatcher) {
             backgroundScope.launch { viewModel.enabledModels.collect {} }
             modelsFlow.value = listOf(WeatherModel.GFS)
             viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
 
             viewModel.onModelToggled(WeatherModel.ECMWF, true)
-            // Simule la persistance qui re-émet via le repo
-            modelsFlow.value = listOf(WeatherModel.GFS, WeatherModel.ECMWF)
-            viewModel.enabledModels.first { it == setOf(WeatherModel.GFS, WeatherModel.ECMWF) }
-
             viewModel.onModelToggled(WeatherModel.ICON_GLOBAL, true)
-            modelsFlow.value = listOf(WeatherModel.GFS, WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL)
-            viewModel.enabledModels.first {
-                it == setOf(WeatherModel.GFS, WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL)
-            }
-
             viewModel.onModelToggled(WeatherModel.GFS, false)
 
-            // Chaque appel utilise le SET COURANT (pas un cache obsolète).
-            coVerifyOrder {
-                prefs.setEnabledModels(match {
-                    it.toSet() == setOf(WeatherModel.GFS, WeatherModel.ECMWF)
-                })
-                prefs.setEnabledModels(match {
-                    it.toSet() == setOf(WeatherModel.GFS, WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL)
-                })
-                prefs.setEnabledModels(match {
-                    it.toSet() == setOf(WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL)
-                })
+            assertEquals(
+                setOf(WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL),
+                viewModel.enabledModels.value
+            )
+            // Invariant réseau : aucun état intermédiaire n'est publié aux
+            // ViewModels météo qui observent DataStore.
+            assertEquals(listOf(WeatherModel.GFS), modelsFlow.value)
+            coVerify(exactly = 0) { prefs.setEnabledModels(any()) }
+
+            assertEquals(true, viewModel.commitModelSelection())
+            assertEquals(
+                setOf(WeatherModel.ECMWF, WeatherModel.ICON_GLOBAL),
+                modelsFlow.value.toSet()
+            )
+            coVerify(exactly = 1) { prefs.setEnabledModels(any()) }
+        }
+
+    @Test
+    fun `selectionner les reglages deja actifs ne persiste ni ne declenche de side effect`() =
+        runTest(dispatcher) {
+            viewModel.feedback.test {
+                viewModel.onUnitSystemSelected(UnitSystem.METRIC)
+                viewModel.onThemeSelected(ThemePreference.SYSTEM)
+                viewModel.onRefreshIntervalSelected(RefreshInterval.DEFAULT)
+                viewModel.onForecastEngineSelected(ForecastEngine.DEFAULT)
+                expectNoEvents()
             }
+
+            coVerify(exactly = 0) { prefs.setUnitSystem(any()) }
+            coVerify(exactly = 0) { prefs.setThemePreference(any()) }
+            coVerify(exactly = 0) { prefs.setRefreshInterval(any()) }
+            coVerify(exactly = 0) { prefs.setForecastEngine(any()) }
+            verify(exactly = 0) {
+                WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>())
+            }
+        }
+
+    @Test
+    fun `selectionner la langue deja active ne persiste pas et ne recree pas`() =
+        runTest(dispatcher) {
+            assertFalse(viewModel.onLanguageSelected(LanguagePreference.SYSTEM))
+            coVerify(exactly = 0) { prefs.setLanguagePreference(any()) }
         }
 
     // ────────────────────────────────────────────────────────────────────
@@ -349,7 +448,7 @@ class SettingsViewModelTest {
         }
 
     @Test
-    fun `echec du trigger widget ne transforme pas un reglage persiste en echec`() =
+    fun `echec du trigger widget conserve le reglage et avertit du rafraichissement differe`() =
         runTest(dispatcher) {
             every {
                 WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>())
@@ -359,46 +458,50 @@ class SettingsViewModelTest {
                 viewModel.onRefreshIntervalSelected(RefreshInterval.HOURS_3)
 
                 val event = awaitItem()
-                assertEquals(R.string.toast_refresh_interval_updated, event.messageRes)
-                assertEquals(AppToastType.SUCCESS, event.type)
+                assertEquals(R.string.toast_widget_refresh_delayed, event.messageRes)
+                assertEquals(AppToastType.WARNING, event.type)
             }
             coVerify(exactly = 1) { prefs.setRefreshInterval(RefreshInterval.HOURS_3) }
         }
 
     @Test
-    fun `onModelToggled - persiste ET force un tick immédiat du widget`() = runTest(dispatcher) {
-        // Le widget lit `observeEnabledModels()` à chaque loadWidgetData.
-        // Sans trigger explicite, l'utilisateur devrait attendre le prochain
-        // tick périodique (jusqu'à 15 min) pour voir un nouveau modèle activé
-        // se refléter sur l'écran d'accueil. C'est spécifiquement la
-        // régression qu'on garde-fou ici.
-        //
-        // Souscription active pour que `enabledModels.value` reflète le
-        // modelsFlow amont — sinon stateIn WhileSubscribed sert l'initialValue.
-        val backgroundJob = backgroundScope.launch {
-            viewModel.enabledModels.collect { /* actif tant qu'on est dans runTest */ }
-        }
-        modelsFlow.value = listOf(WeatherModel.GFS)  // état source connu
+    fun `commit modeles - echec du refresh widget retourne un succes differe`() = runTest(dispatcher) {
+        backgroundScope.launch { viewModel.enabledModels.collect {} }
+        modelsFlow.value = listOf(WeatherModel.GFS)
+        viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
+        viewModel.onModelToggled(WeatherModel.ECMWF, enabled = true)
+        every {
+            WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>())
+        } throws IllegalStateException("WorkManager indisponible")
+
+        assertEquals(
+            ModelSelectionCommitResult.SAVED_WIDGET_REFRESH_DELAYED,
+            viewModel.commitModelSelectionResult()
+        )
+        assertEquals(setOf(WeatherModel.GFS, WeatherModel.ECMWF), modelsFlow.value.toSet())
+    }
+
+    @Test
+    fun `commit modeles - persiste avant un unique refresh widget`() = runTest(dispatcher) {
+        backgroundScope.launch { viewModel.enabledModels.collect {} }
+        modelsFlow.value = listOf(WeatherModel.GFS)
+        viewModel.enabledModels.first { it == setOf(WeatherModel.GFS) }
 
         viewModel.onModelToggled(WeatherModel.ECMWF, enabled = true)
+        viewModel.onModelToggled(WeatherModel.ICON_GLOBAL, enabled = true)
 
-        // On vérifie l'ORDRE (persist → trigger) sans dépendre du contenu
-        // exact de la liste — l'ordre d'itération d'un Set + toList() est
-        // spécifié pour LinkedHashSet mais on préfère ne pas tester ça ici.
-        // Vérification du contenu :
-        coVerify {
-            prefs.setEnabledModels(
-                match {
-                    it.containsAll(listOf(WeatherModel.GFS, WeatherModel.ECMWF)) && it.size == 2
-                }
-            )
-        }
-        // Vérification de l'ordre setEnabled → triggerImmediateRefresh :
+        // Aucun refresh pendant l'édition.
+        verify(exactly = 0) { WidgetRefreshScheduler.triggerImmediateRefresh(any<Context>()) }
+        coVerify(exactly = 0) { prefs.setEnabledModels(any()) }
+
+        assertEquals(true, viewModel.commitModelSelection())
+
         coVerifyOrder {
             prefs.setEnabledModels(any())
             WidgetRefreshScheduler.triggerImmediateRefresh(appContext)
         }
-        backgroundJob.cancel()
+        coVerify(exactly = 1) { prefs.setEnabledModels(any()) }
+        verify(exactly = 1) { WidgetRefreshScheduler.triggerImmediateRefresh(appContext) }
     }
     @Test
     fun `forecastEngine - suit le repository et le changement rafraichit le widget`() = runTest(dispatcher) {
@@ -426,7 +529,13 @@ class SettingsViewModelTest {
 
             val expected = NotificationSettings(dailySummaryEnabled = true, cityIds = setOf(paris.id))
             assertEquals(expected, notificationFlow.value)
-            verify(exactly = 1) { WeatherNotificationScheduler.reschedule(appContext, expected) }
+            verify(exactly = 1) {
+                WeatherNotificationScheduler.reschedule(
+                    appContext,
+                    expected,
+                    kickAlertsImmediately = false
+                )
+            }
         }
 
     @Test
@@ -449,9 +558,48 @@ class SettingsViewModelTest {
 
         assertEquals(LocalTime.of(6, 30), notificationFlow.value.dailySummaryTime)
         verify(exactly = 1) {
-            WeatherNotificationScheduler.reschedule(appContext, notificationFlow.value)
+            WeatherNotificationScheduler.reschedule(
+                appContext,
+                notificationFlow.value,
+                kickAlertsImmediately = false
+            )
         }
     }
+
+    @Test
+    fun `notifications - activer une alerte demande un controle immediat`() = runTest(dispatcher) {
+        notificationFlow.value = NotificationSettings(cityIds = setOf(paris.id))
+
+        viewModel.onDivergenceAlertsToggled(true)
+
+        verify(exactly = 1) {
+            WeatherNotificationScheduler.reschedule(
+                appContext,
+                notificationFlow.value,
+                kickAlertsImmediately = true
+            )
+        }
+    }
+
+    @Test
+    fun `notifications - changer uniquement l heure quotidienne ne lance pas les alertes`() =
+        runTest(dispatcher) {
+            notificationFlow.value = NotificationSettings(
+                dailySummaryEnabled = true,
+                divergenceAlertsEnabled = true,
+                cityIds = setOf(paris.id)
+            )
+
+            viewModel.onDailySummaryTimeSelected(LocalTime.of(7, 15))
+
+            verify(exactly = 1) {
+                WeatherNotificationScheduler.reschedule(
+                    appContext,
+                    notificationFlow.value,
+                    kickAlertsImmediately = false
+                )
+            }
+        }
 
     @Test
     fun `notifications - echec d'ecriture signale sans replanifier`() = runTest(dispatcher) {
@@ -461,6 +609,143 @@ class SettingsViewModelTest {
             viewModel.onForecastChangeAlertsToggled(true)
             assertEquals(AppToastType.ERROR, awaitItem().type)
         }
-        verify(exactly = 0) { WeatherNotificationScheduler.reschedule(any(), any()) }
+        verify(exactly = 0) { WeatherNotificationScheduler.reschedule(any(), any(), any()) }
     }
+    @Test
+    fun `notifications - activation du resume confirme le succes`() = runTest(dispatcher) {
+        viewModel.feedback.test {
+            viewModel.onDailySummaryToggled(true)
+
+            val event = awaitItem()
+            assertEquals(AppToastType.SUCCESS, event.type)
+            assertEquals(R.string.toast_notifications_daily_enabled, event.messageRes)
+        }
+    }
+
+    @Test
+    fun `notifications - desactivation du resume confirme le succes`() = runTest(dispatcher) {
+        notificationFlow.value = NotificationSettings(
+            dailySummaryEnabled = true,
+            cityIds = setOf(paris.id)
+        )
+        viewModel.feedback.test {
+            viewModel.onDailySummaryToggled(false)
+
+            val event = awaitItem()
+            assertEquals(AppToastType.SUCCESS, event.type)
+            assertEquals(R.string.toast_notifications_daily_disabled, event.messageRes)
+        }
+    }
+
+    @Test
+    fun `notifications - changement d heure confirme le succes`() = runTest(dispatcher) {
+        notificationFlow.value = NotificationSettings(
+            dailySummaryEnabled = true,
+            dailySummaryTime = LocalTime.of(7, 0),
+            cityIds = setOf(paris.id)
+        )
+        viewModel.feedback.test {
+            viewModel.onDailySummaryTimeSelected(LocalTime.of(6, 30))
+
+            val event = awaitItem()
+            assertEquals(AppToastType.SUCCESS, event.type)
+            assertEquals(R.string.toast_notifications_time_updated, event.messageRes)
+        }
+    }
+
+    @Test
+    fun `notifications - chaque type d alerte confirme activation et desactivation`() =
+        runTest(dispatcher) {
+            notificationFlow.value = NotificationSettings(cityIds = setOf(paris.id))
+            viewModel.feedback.test {
+                viewModel.onDivergenceAlertsToggled(true)
+                assertEquals(R.string.toast_notifications_divergence_enabled, awaitItem().messageRes)
+
+                viewModel.onDivergenceAlertsToggled(false)
+                assertEquals(R.string.toast_notifications_divergence_disabled, awaitItem().messageRes)
+
+                viewModel.onForecastChangeAlertsToggled(true)
+                assertEquals(R.string.toast_notifications_change_enabled, awaitItem().messageRes)
+
+                viewModel.onForecastChangeAlertsToggled(false)
+                assertEquals(R.string.toast_notifications_change_disabled, awaitItem().messageRes)
+            }
+        }
+
+    @Test
+    fun `notifications - changement de ville nomme la ville dans le toast`() = runTest(dispatcher) {
+        notificationFlow.value = NotificationSettings(
+            divergenceAlertsEnabled = true,
+            cityIds = setOf(paris.id)
+        )
+        viewModel.feedback.test {
+            viewModel.onNotificationCityToggled(lyon.id, followed = true)
+            val added = awaitItem()
+            assertEquals(R.string.toast_notifications_city_enabled, added.messageRes)
+            assertEquals(listOf(lyon.name), added.formatArgs)
+
+            viewModel.onNotificationCityToggled(lyon.id, followed = false)
+            val removed = awaitItem()
+            assertEquals(R.string.toast_notifications_city_disabled, removed.messageRes)
+            assertEquals(listOf(lyon.name), removed.formatArgs)
+        }
+    }
+
+    @Test
+    fun `notifications - valeur identique ne replanifie pas et n affiche pas de toast`() =
+        runTest(dispatcher) {
+            notificationFlow.value = NotificationSettings(
+                dailySummaryEnabled = true,
+                cityIds = setOf(paris.id)
+            )
+            viewModel.feedback.test {
+                viewModel.onDailySummaryToggled(true)
+                expectNoEvents()
+            }
+            verify(exactly = 0) { WeatherNotificationScheduler.reschedule(any(), any(), any()) }
+        }
+
+    @Test
+    fun `notifications - echec de replanification avertit mais conserve le reglage`() =
+        runTest(dispatcher) {
+            every {
+                WeatherNotificationScheduler.reschedule(any(), any(), any())
+            } throws IllegalStateException("WorkManager unavailable")
+
+            viewModel.feedback.test {
+                viewModel.onDivergenceAlertsToggled(true)
+                val event = awaitItem()
+                assertEquals(AppToastType.WARNING, event.type)
+                assertEquals(R.string.toast_notifications_schedule_warning, event.messageRes)
+            }
+            assertTrue(notificationFlow.value.divergenceAlertsEnabled)
+        }
+
+    @Test
+    fun `units are persisted before widget refresh and exposed reactively`() = runTest(dispatcher) {
+        val units = MutableStateFlow(UnitSystem.METRIC)
+        every { prefs.observeUnitSystem() } returns units
+        coEvery { prefs.setUnitSystem(any()) } answers { units.value = firstArg() }
+        val vm = SettingsViewModel(appContext, prefs, cityRepository)
+        vm.unitSystem.test {
+            assertEquals(UnitSystem.METRIC, awaitItem())
+            vm.onUnitSystemSelected(UnitSystem.IMPERIAL)
+            assertEquals(UnitSystem.IMPERIAL, awaitItem())
+            coVerifyOrder {
+                prefs.setUnitSystem(UnitSystem.IMPERIAL)
+                WidgetRefreshScheduler.triggerImmediateRefresh(appContext)
+            }
+        }
+    }
+
+    @Test
+    fun `failed unit save reports an error without refreshing widgets`() = runTest(dispatcher) {
+        coEvery { prefs.setUnitSystem(any()) } throws IOException("disk unavailable")
+        viewModel.feedback.test {
+            viewModel.onUnitSystemSelected(UnitSystem.IMPERIAL)
+            assertEquals(AppToastType.ERROR, awaitItem().type)
+        }
+        verify(exactly = 0) { WidgetRefreshScheduler.triggerImmediateRefresh(appContext) }
+    }
+
 }

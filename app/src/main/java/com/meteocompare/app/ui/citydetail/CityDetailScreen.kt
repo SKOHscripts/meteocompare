@@ -1,5 +1,9 @@
 package com.meteocompare.app.ui.citydetail
 
+import com.meteocompare.app.core.units.WeatherUnit
+import com.meteocompare.app.core.units.WeatherUnits
+import com.meteocompare.app.core.units.LocalWeatherUnits
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -32,9 +36,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.outlined.Air
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.WaterDrop
@@ -77,7 +80,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
+import com.meteocompare.app.core.units.weatherStringResource as stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +91,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meteocompare.app.R
+import com.meteocompare.app.data.worker.BiasHistoryRefreshState
 import com.meteocompare.app.core.locale.weatherConditionLabelRes
 import com.meteocompare.app.domain.model.BiasVariable
 import com.meteocompare.app.domain.model.CityDetailContentTab
@@ -98,6 +102,7 @@ import com.meteocompare.app.domain.model.ConfidenceScore
 import com.meteocompare.app.domain.model.DailyForecast
 import com.meteocompare.app.domain.model.DayConfidence
 import com.meteocompare.app.domain.model.DayNormals
+import com.meteocompare.app.domain.model.ForecastDisplayHorizon
 import com.meteocompare.app.domain.model.ForecastEngineContext
 import com.meteocompare.app.domain.model.HourlyConfidenceBand
 import com.meteocompare.app.domain.model.HourlyForecast
@@ -144,19 +149,16 @@ fun CityDetailScreen(
     onConfidenceClick: (isoDate: String) -> Unit = {},
     onEngineComparisonClick: () -> Unit = {},
     onGraphicViewClick: () -> Unit = {},
+    onRadarClick: () -> Unit = {},
     showBackButton: Boolean = true,
     viewModel: CityDetailViewModel = hiltViewModel()
 ) {
+    // Seuls les états qui pilotent réellement le scaffold sont observés ici.
+    // Les états de sections sont collectés plus bas, dans
+    // CityDetailLoadedStateBridge, afin qu'une évolution marine/biais/etc. ne
+    // recompose pas l'AppBar ni le conteneur Loading/Error.
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
-    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
-    val biasState by viewModel.biasState.collectAsStateWithLifecycle()
-    val evolutionState by viewModel.evolutionState.collectAsStateWithLifecycle()
-    val marineState by viewModel.marineState.collectAsStateWithLifecycle()
-    val vigilanceState by viewModel.vigilanceState.collectAsStateWithLifecycle()
-    val collapsedSections by viewModel.collapsedSections.collectAsStateWithLifecycle()
-    val detailViewMode by viewModel.detailViewMode.collectAsStateWithLifecycle()
-    val detailContentTab by viewModel.detailContentTab.collectAsStateWithLifecycle()
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshIfStale()
@@ -187,28 +189,73 @@ fun CityDetailScreen(
     }
     AppToastEffect(refreshToasts)
 
-    CityDetailContent(
+    CityDetailScaffold(
         state = state,
         isRefreshing = isRefreshing,
+        onBack = onBack,
+        onRefresh = viewModel::refresh,
+        onEngineComparisonClick = onEngineComparisonClick,
+        onGraphicViewClick = onGraphicViewClick,
+        onRadarClick = onRadarClick,
+        showBackButton = showBackButton
+    ) { loaded, padding ->
+        CityDetailLoadedStateBridge(
+            loaded = loaded,
+            padding = padding,
+            viewModel = viewModel,
+            onConfidenceClick = onConfidenceClick
+        )
+    }
+}
+
+@Composable
+private fun CityDetailLoadedStateBridge(
+    loaded: CityDetailUiState.Loaded,
+    padding: PaddingValues,
+    viewModel: CityDetailViewModel,
+    onConfidenceClick: (isoDate: String) -> Unit
+) {
+    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
+    val biasState by viewModel.biasState.collectAsStateWithLifecycle()
+    val biasHistoryRefreshState by viewModel.biasHistoryRefreshState.collectAsStateWithLifecycle()
+    val evolutionState by viewModel.evolutionState.collectAsStateWithLifecycle()
+    val marineState by viewModel.marineState.collectAsStateWithLifecycle()
+    val vigilanceState by viewModel.vigilanceState.collectAsStateWithLifecycle()
+    val collapsedSections by viewModel.collapsedSections.collectAsStateWithLifecycle()
+    val detailViewMode by viewModel.detailViewMode.collectAsStateWithLifecycle()
+    val detailContentTab by viewModel.detailContentTab.collectAsStateWithLifecycle()
+
+    LoadedView(
+        forecast = loaded.forecast,
+        weekly = loaded.weeklyConfidence,
+        hourlyBands = loaded.hourlyBands,
+        hourlyPrecipBands = loaded.hourlyPrecipBands,
+        hourlyWindBands = loaded.hourlyWindBands,
+        currentTemp = loaded.currentTemp,
+        currentCondition = loaded.currentCondition,
+        currentCloudCover = loaded.currentCloudCover,
+        dailyConditions = loaded.dailyConditions,
+        normals = loaded.normals,
+        engineContext = loaded.engineContext,
+        calculatedAt = loaded.calculatedAt,
+        fetchedAt = loaded.fetchedAt,
         isOnline = isOnline,
         biasState = biasState,
+        biasHistoryRefreshState = biasHistoryRefreshState,
         evolutionState = evolutionState,
         marineState = marineState,
-        vigilanceState = vigilanceState,
+        vigilance = (vigilanceState as? VigilanceUiState.Loaded)?.forecast
+            ?.takeIf { loaded.forecast.city.isFrenchLocation },
         collapsedSections = collapsedSections,
         detailViewMode = detailViewMode,
         detailContentTab = detailContentTab,
-        onBack = onBack,
-        onRefresh = viewModel::refresh,
-        onRefreshMarine = viewModel::refreshMarine,
+        padding = padding,
         onSectionExpandedChange = viewModel::setSectionExpanded,
         onDetailViewModeChange = viewModel::setDetailViewMode,
         onDetailContentTabChange = viewModel::setDetailContentTab,
-        onConfidenceClick = onConfidenceClick,
-        onEngineComparisonClick = onEngineComparisonClick,
-        onGraphicViewClick = onGraphicViewClick,
+        onRefreshMarine = viewModel::refreshMarine,
         onRequestBiasHistory = viewModel::requestBiasHistory,
-        showBackButton = showBackButton
+        onConfidenceClick = onConfidenceClick
     )
 }
 
@@ -223,6 +270,7 @@ internal fun CityDetailContent(
     isRefreshing: Boolean,
     isOnline: Boolean = true,
     biasState: BiasScreenState,
+    biasHistoryRefreshState: BiasHistoryRefreshState = BiasHistoryRefreshState.IDLE,
     evolutionState: ForecastEvolutionState = ForecastEvolutionState.Idle,
     marineState: MarineUiState = MarineUiState.Idle,
     vigilanceState: VigilanceUiState = VigilanceUiState.Idle,
@@ -239,8 +287,69 @@ internal fun CityDetailContent(
     onConfidenceClick: (isoDate: String) -> Unit = {},
     onEngineComparisonClick: () -> Unit = {},
     onGraphicViewClick: () -> Unit = {},
+    onRadarClick: () -> Unit = {},
     onRequestBiasHistory: () -> Unit = {},
     showBackButton: Boolean = true
+) {
+    CityDetailScaffold(
+        state = state,
+        isRefreshing = isRefreshing,
+        snackbarHostState = snackbarHostState,
+        onBack = onBack,
+        onRefresh = onRefresh,
+        onEngineComparisonClick = onEngineComparisonClick,
+        onGraphicViewClick = onGraphicViewClick,
+        onRadarClick = onRadarClick,
+        showBackButton = showBackButton
+    ) { loaded, padding ->
+        LoadedView(
+            forecast = loaded.forecast,
+            weekly = loaded.weeklyConfidence,
+            hourlyBands = loaded.hourlyBands,
+            hourlyPrecipBands = loaded.hourlyPrecipBands,
+            hourlyWindBands = loaded.hourlyWindBands,
+            currentTemp = loaded.currentTemp,
+            currentCondition = loaded.currentCondition,
+            currentCloudCover = loaded.currentCloudCover,
+            dailyConditions = loaded.dailyConditions,
+            normals = loaded.normals,
+            engineContext = loaded.engineContext,
+            calculatedAt = loaded.calculatedAt,
+            fetchedAt = loaded.fetchedAt,
+            isOnline = isOnline,
+            biasState = biasState,
+            biasHistoryRefreshState = biasHistoryRefreshState,
+            evolutionState = evolutionState,
+            marineState = marineState,
+            vigilance = (vigilanceState as? VigilanceUiState.Loaded)?.forecast
+                ?.takeIf { loaded.forecast.city.isFrenchLocation },
+            collapsedSections = collapsedSections,
+            detailViewMode = detailViewMode,
+            detailContentTab = detailContentTab,
+            padding = padding,
+            onSectionExpandedChange = onSectionExpandedChange,
+            onDetailViewModeChange = onDetailViewModeChange,
+            onDetailContentTabChange = onDetailContentTabChange,
+            onRefreshMarine = onRefreshMarine,
+            onRequestBiasHistory = onRequestBiasHistory,
+            onConfidenceClick = onConfidenceClick
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CityDetailScaffold(
+    state: CityDetailUiState,
+    isRefreshing: Boolean,
+    snackbarHostState: SnackbarHostState? = null,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onEngineComparisonClick: () -> Unit,
+    onGraphicViewClick: () -> Unit,
+    onRadarClick: () -> Unit,
+    showBackButton: Boolean,
+    loadedContent: @Composable (CityDetailUiState.Loaded, PaddingValues) -> Unit
 ) {
     WeatherAccentTheme(
         condition = (state as? CityDetailUiState.Loaded)?.currentCondition
@@ -296,6 +405,15 @@ internal fun CityDetailContent(
                     actions = {
                         if (state is CityDetailUiState.Loaded) {
                             IconButton(
+                                onClick = onRadarClick,
+                                modifier = Modifier.testTag(TAG_RADAR_ACTION)
+                            ) {
+                                Icon(
+                                    Icons.Default.Radar,
+                                    contentDescription = stringResource(R.string.radar_open)
+                                )
+                            }
+                            IconButton(
                                 onClick = onEngineComparisonClick,
                                 modifier = Modifier.testTag(TAG_ENGINE_COMPARISON_ACTION)
                             ) {
@@ -349,11 +467,11 @@ internal fun CityDetailContent(
                         is CityDetailUiState.Error -> "error"
                     }
                 }
-            ) { s ->
-                when (s) {
+            ) { current ->
+                when (current) {
                     CityDetailUiState.Loading -> LoadingView(padding)
                     is CityDetailUiState.Error -> ErrorView(
-                        message = s.message,
+                        message = current.message,
                         onRetry = onRefresh,
                         padding = padding
                     )
@@ -362,37 +480,7 @@ internal fun CityDetailContent(
                         onRefresh = onRefresh,
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        LoadedView(
-                            forecast = s.forecast,
-                            weekly = s.weeklyConfidence,
-                            hourlyBands = s.hourlyBands,
-                            hourlyPrecipBands = s.hourlyPrecipBands,
-                            hourlyWindBands = s.hourlyWindBands,
-                            currentTemp = s.currentTemp,
-                            currentCondition = s.currentCondition,
-                            currentCloudCover = s.currentCloudCover,
-                            dailyConditions = s.dailyConditions,
-                            normals = s.normals,
-                            engineContext = s.engineContext,
-                            calculatedAt = s.calculatedAt,
-                            fetchedAt = s.fetchedAt,
-                            isOnline = isOnline,
-                            biasState = biasState,
-                            evolutionState = evolutionState,
-                            marineState = marineState,
-                            vigilance = (vigilanceState as? VigilanceUiState.Loaded)?.forecast
-                                ?.takeIf { s.forecast.city.isFrenchLocation },
-                            collapsedSections = collapsedSections,
-                            detailViewMode = detailViewMode,
-                            detailContentTab = detailContentTab,
-                            padding = padding,
-                            onSectionExpandedChange = onSectionExpandedChange,
-                            onDetailViewModeChange = onDetailViewModeChange,
-                            onDetailContentTabChange = onDetailContentTabChange,
-                            onRefreshMarine = onRefreshMarine,
-                            onConfidenceClick = onConfidenceClick,
-                            onRequestBiasHistory = onRequestBiasHistory
-                        )
+                        loadedContent(current, padding)
                     }
                 }
             }
@@ -458,6 +546,7 @@ private fun LoadedView(
     fetchedAt: Instant?,
     isOnline: Boolean,
     biasState: BiasScreenState,
+    biasHistoryRefreshState: BiasHistoryRefreshState,
     evolutionState: ForecastEvolutionState,
     marineState: MarineUiState,
     vigilance: VigilanceForecast?,
@@ -484,35 +573,50 @@ private fun LoadedView(
     // « maintenant » : résumé, chronologie et tableaux restent cohérents.
     val presentationNow = calculatedAt
     val engineCacheSignature = engineContext.cacheSignature
-    val overviewTimeline = remember(forecast, presentationNow, engineCacheSignature) {
-        buildOverviewTimeline(forecast, presentationNow, engineContext)
+    val hourlyTimelinePoints = remember(forecast, presentationNow, engineCacheSignature) {
+        buildSimplifiedTimeline(
+            forecast = forecast,
+            mode = DisplayMode.HOURLY,
+            now = presentationNow,
+            engineContext = engineContext,
+            hourlyHorizonHours = ForecastDisplayHorizon.HOURLY_HOURS
+        )
+    }
+    val dailyTimelinePoints = remember(forecast, presentationNow, engineCacheSignature) {
+        buildSimplifiedTimeline(
+            forecast = forecast,
+            mode = DisplayMode.DAILY,
+            now = presentationNow,
+            engineContext = engineContext,
+            dailyHorizonDays = ForecastDisplayHorizon.DAYS
+        )
+    }
+    val overviewTimeline = remember(hourlyTimelinePoints, dailyTimelinePoints, forecast.city.timezone) {
+        overviewFromTimelines(hourlyTimelinePoints, dailyTimelinePoints, forecast.city.timezone)
     }
     val forecastEvents = remember(overviewTimeline) { detectForecastEvents(overviewTimeline) }
     val insights = remember(forecastEvents) { buildForecastInsights(forecastEvents) }
     val evolutionHighlight = (evolutionState as? ForecastEvolutionState.Loaded)?.highlight
     val hasInsightSection = insights.isNotEmpty() || evolutionHighlight != null
-    val hourlyTimelinePoints = remember(forecast, presentationNow, engineCacheSignature) {
-        buildSimplifiedTimeline(forecast, DisplayMode.HOURLY, presentationNow, engineContext)
+    val timelineAvailableRanges = remember(hourlyTimelinePoints, dailyTimelinePoints) {
+        buildSet {
+            if (hourlyTimelinePoints.isNotEmpty()) add(TimelineRange.HOURLY)
+            if (dailyTimelinePoints.isNotEmpty()) add(TimelineRange.DAILY)
+        }
     }
-    val dailyTimelinePoints = remember(forecast, presentationNow, engineCacheSignature) {
-        buildSimplifiedTimeline(forecast, DisplayMode.DAILY, presentationNow, engineContext)
+    var timelineRange by remember(overviewTimeline) {
+        mutableStateOf(TimelineRange.defaultFor(overviewTimeline.mode))
     }
-    val timelineAvailableModes = remember(hourlyTimelinePoints, dailyTimelinePoints) {
-        listOfNotNull(
-            DisplayMode.HOURLY.takeIf { hourlyTimelinePoints.isNotEmpty() },
-            DisplayMode.DAILY.takeIf { dailyTimelinePoints.isNotEmpty() }
-        ).toSet()
-    }
-    var timelineMode by remember(overviewTimeline) { mutableStateOf(overviewTimeline.mode) }
+    val timelineMode = timelineRange.displayMode
     var timelineLayoutName by rememberSaveable(forecast.city.id) {
         mutableStateOf(TimelineLayout.COLUMNS.name)
     }
     val timelineLayout = remember(timelineLayoutName) {
         TimelineLayout.entries.firstOrNull { it.name == timelineLayoutName } ?: TimelineLayout.COLUMNS
     }
-    val timelineAnalysisPoints = when (timelineMode) {
-        DisplayMode.HOURLY -> hourlyTimelinePoints
-        DisplayMode.DAILY -> dailyTimelinePoints
+    val timelineAnalysisPoints = when (timelineRange) {
+        TimelineRange.HOURLY -> hourlyTimelinePoints
+        TimelineRange.DAILY -> dailyTimelinePoints
     }
     val timelineEvents = remember(timelineMode, timelineAnalysisPoints, forecast.city.timezone) {
         detectForecastEvents(
@@ -523,8 +627,11 @@ private fun LoadedView(
             )
         )
     }
-    val timelineDisplayPoints = remember(timelineAnalysisPoints) {
-        selectRegularTimelinePoints(timelineAnalysisPoints)
+    val timelineDisplayPoints = remember(timelineAnalysisPoints, timelineRange) {
+        selectRegularTimelinePoints(
+            points = timelineAnalysisPoints,
+            maxPoints = timelineRange.maxDisplayPoints
+        )
     }
     var focusedTimelinePoint by remember(overviewTimeline) {
         mutableStateOf<SimplifiedTimelinePoint?>(null)
@@ -546,6 +653,14 @@ private fun LoadedView(
     }
     val cityToday = remember(forecast.city.timezone, presentationNow) {
         cityLocalDate(forecast.city.timezone, presentationNow)
+    }
+    // Toutes les vues approfondies de la page détail partagent le même horizon
+    // de 10 jours. Les séries horaires utilisent la fenêtre glissante commune.
+    val detailedForecast = remember(forecast) {
+        forecast.limitDailyHorizon(ForecastDisplayHorizon.DAYS)
+    }
+    val detailedDailyConditions = remember(dailyConditions) {
+        dailyConditions.take(ForecastDisplayHorizon.DAYS)
     }
     val summaryDay = remember(weekly, cityToday) {
         weekly.firstOrNull { !it.date.isBefore(cityToday) } ?: weekly.lastOrNull()
@@ -673,10 +788,10 @@ private fun LoadedView(
                         if (target != null) {
                             onSectionExpandedChange(CityDetailSection.TIMELINE, true)
                             when {
-                                target.instant != null && DisplayMode.HOURLY in timelineAvailableModes ->
-                                    timelineMode = DisplayMode.HOURLY
-                                target.date != null && DisplayMode.DAILY in timelineAvailableModes ->
-                                    timelineMode = DisplayMode.DAILY
+                                target.instant != null && TimelineRange.HOURLY in timelineAvailableRanges ->
+                                    timelineRange = TimelineRange.HOURLY
+                                target.date != null && TimelineRange.DAILY in timelineAvailableRanges ->
+                                    timelineRange = TimelineRange.DAILY
                             }
                             focusedTimelinePoint = target
                             timelineFocusRequestId += 1
@@ -695,11 +810,12 @@ private fun LoadedView(
                     timezone = forecast.city.timezone,
                     focusPoint = focusedTimelinePoint,
                     focusRequestId = timelineFocusRequestId,
-                    onModeChange = { newMode ->
-                        timelineMode = newMode
+                    range = timelineRange,
+                    onRangeChange = { newRange ->
+                        timelineRange = newRange
                         focusedTimelinePoint = null
                     },
-                    availableModes = timelineAvailableModes,
+                    availableRanges = timelineAvailableRanges,
                     layout = timelineLayout,
                     onLayoutChange = { newLayout ->
                         timelineLayoutName = newLayout.name
@@ -774,12 +890,13 @@ private fun LoadedView(
             DetailedForecastSection(
                 mode = displayMode,
                 tab = detailContentTab,
-                forecast = forecast,
-                dailyConditions = dailyConditions,
+                forecast = detailedForecast,
+                dailyConditions = detailedDailyConditions,
                 normals = normals,
                 presentationNow = presentationNow,
                 cityToday = cityToday,
                 biasHistoryProgress = biasHistoryProgress,
+                biasHistoryRefreshState = biasHistoryRefreshState,
                 onRequestBiasHistory = onRequestBiasHistory,
                 onModeChange = { onDetailViewModeChange(it.toPreference()) },
                 onTabChange = onDetailContentTabChange,
@@ -875,6 +992,30 @@ private fun LoadedView(
     }
 }
 
+private fun CityForecast.limitDailyHorizon(days: Int): CityForecast {
+    val limit = days.coerceAtLeast(1)
+    return copy(
+        seriesByModel = seriesByModel.mapValues { (_, series) ->
+            val daily = series.daily
+            series.copy(
+                daily = daily.copy(
+                    dates = daily.dates.take(limit),
+                    tempMax = daily.tempMax.take(limit),
+                    tempMin = daily.tempMin.take(limit),
+                    precipitationSum = daily.precipitationSum.take(limit),
+                    windSpeedMax = daily.windSpeedMax.take(limit),
+                    weatherCode = daily.weatherCode.take(limit),
+                    windDirection10mDominant = daily.windDirection10mDominant.take(limit),
+                    precipitationProbabilityMax = daily.precipitationProbabilityMax.take(limit),
+                    windGustsMax = daily.windGustsMax.take(limit),
+                    sunrise = daily.sunrise.take(limit),
+                    sunset = daily.sunset.take(limit)
+                )
+            )
+        }
+    )
+}
+
 // ============================================================================
 //  Comparaison détaillée : une seule famille de données à la fois
 // ============================================================================
@@ -889,6 +1030,7 @@ private fun DetailedForecastSection(
     presentationNow: Instant,
     cityToday: LocalDate,
     biasHistoryProgress: BiasHistoryProgress?,
+    biasHistoryRefreshState: BiasHistoryRefreshState,
     onRequestBiasHistory: () -> Unit,
     onModeChange: (DisplayMode) -> Unit,
     onTabChange: (CityDetailContentTab) -> Unit,
@@ -931,6 +1073,7 @@ private fun DetailedForecastSection(
                 if (biasHistoryProgress != null) {
                     BiasHistoryHint(
                         progress = biasHistoryProgress,
+                        refreshState = biasHistoryRefreshState,
                         onRequestHistory = onRequestBiasHistory,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     )
@@ -960,7 +1103,7 @@ private fun DetailedForecastSection(
 }
 
 @Composable
-private fun DetailedComparisonContent(
+internal fun DetailedComparisonContent(
     mode: DisplayMode,
     tab: CityDetailContentTab,
     forecast: CityForecast,
@@ -974,7 +1117,8 @@ private fun DetailedComparisonContent(
     temperatureSampleCountProvider: ((WeatherModel) -> Int)? = null,
     precipitationSampleCountProvider: ((WeatherModel) -> Int)? = null,
     windSampleCountProvider: ((WeatherModel) -> Int)? = null,
-    onBiasChipClick: ((WeatherModel, ModelBias) -> Unit)? = null
+    onBiasChipClick: ((WeatherModel, ModelBias) -> Unit)? = null,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     Column {
         when (tab) {
@@ -1027,7 +1171,7 @@ private fun DetailedComparisonContent(
                             valueExtractor = { hourly: HourlyForecast, idx ->
                                 hourly.temperature2m.getOrNull(idx)
                             },
-                            valueFormatter = { "${it.roundToInt()}°" },
+                            valueFormatter = { units.temp(it) },
                             heatmapStyler = ::hourlyTemperatureHeatmap,
                             modelBiasProvider = temperatureBiasProvider,
                             sampleCountProvider = temperatureSampleCountProvider,
@@ -1046,7 +1190,7 @@ private fun DetailedComparisonContent(
                         now = presentationNow,
                         extractor = { daily, idx -> daily.precipitationSum.getOrNull(idx) },
                         formatter = { mm ->
-                            if (mm < 0.05) "0" else "${"%.1f".format(mm)} mm"
+                            units.rain(mm)
                         },
                         valueStyler = ::precipitationStyle,
                         modelBiasProvider = precipitationBiasProvider,
@@ -1063,7 +1207,7 @@ private fun DetailedComparisonContent(
                                 hourly.precipitation.getOrNull(idx)
                             },
                             valueFormatter = { mm ->
-                                if (mm < 0.05) "0 mm" else "%.1f mm".format(mm)
+                                units.rain(mm)
                             },
                             heatmapStyler = ::hourlyPrecipitationHeatmap,
                             modelBiasProvider = precipitationBiasProvider,
@@ -1083,10 +1227,10 @@ private fun DetailedComparisonContent(
                         forecast = forecast,
                         now = presentationNow,
                         extractor = { daily, idx -> daily.windSpeedMax.getOrNull(idx) },
-                        formatter = { "${it.roundToInt()} km/h" },
+                        formatter = { units.speed(it) },
                         valueStyler = ::windStyle,
                         secondaryExtractor = { daily, idx -> daily.windGustsMax.getOrNull(idx) },
-                        secondaryFormatter = { "$gustAbbreviation ${it.roundToInt()}" },
+                        secondaryFormatter = { "$gustAbbreviation ${units.value(it, WeatherUnit.WIND_SPEED)}" },
                         directionExtractor = { daily, idx ->
                             val speed = daily.windSpeedMax.getOrNull(idx)
                             if (speed == null || speed < 5.0) null
@@ -1105,12 +1249,12 @@ private fun DetailedComparisonContent(
                             valueExtractor = { hourly: HourlyForecast, idx ->
                                 hourly.windSpeed10m.getOrNull(idx)
                             },
-                            valueFormatter = { "${it.roundToInt()} km/h" },
+                            valueFormatter = { units.speed(it) },
                             heatmapStyler = ::hourlyWindHeatmap,
                             secondaryValueExtractor = { hourly, idx ->
                                 hourly.windGusts10m.getOrNull(idx)
                             },
-                            secondaryValueFormatter = { "$gustAbbreviation ${it.roundToInt()}" },
+                            secondaryValueFormatter = { "$gustAbbreviation ${units.value(it, WeatherUnit.WIND_SPEED)}" },
                             directionExtractor = { hourly, idx ->
                                 val speed = hourly.windSpeed10m.getOrNull(idx)
                                 if (speed == null || speed < 5.0) null
@@ -1210,7 +1354,7 @@ private fun DetailedEmptyState() {
  * position des extrémités du dégradé.
  */
 @Composable
-private fun HourlyTemperatureLegend() {
+private fun HourlyTemperatureLegend(units: WeatherUnits = LocalWeatherUnits.current) {
     HeatmapGradientLegend(
         colors = listOf(
             Color(0xFF0D47A1), Color(0xFF1565C0), Color(0xFF1E88E5),
@@ -1222,8 +1366,9 @@ private fun HourlyTemperatureLegend() {
         // seg1 = "<-10", seg2 = "-10", ..., seg10 = "≥30°".
         // "°" sur les seules bornes extrêmes évite de saturer visuellement.
         tickLabels = listOf(
-            "<-10", "-10", "-5", "0", "5", "10", "15", "20", "25", "≥30°"
-        )
+            "<${units.value(-10.0, WeatherUnit.TEMPERATURE_COMPACT)}", *listOf(-10.0, -5.0, 0.0, 5.0, 10.0, 15.0, 20.0, 25.0).map { units.value(it, WeatherUnit.TEMPERATURE_COMPACT) }.toTypedArray(), "≥${units.value(30.0, WeatherUnit.TEMPERATURE_COMPACT)}"
+        ),
+        unitLabel = units.temperatureUnit
     )
 }
 
@@ -1240,7 +1385,7 @@ private fun HourlyTemperatureLegend() {
  * grandeur sans encombrer.
  */
 @Composable
-private fun HourlyPrecipitationLegend() {
+private fun HourlyPrecipitationLegend(units: WeatherUnits = LocalWeatherUnits.current) {
     HeatmapGradientLegend(
         colors = listOf(
             Color(0xFFE3F2FD), Color(0xFFBBDEFB), Color(0xFF90CAF9),
@@ -1248,9 +1393,12 @@ private fun HourlyPrecipitationLegend() {
             Color(0xFF1E88E5), Color(0xFF1976D2), Color(0xFF1565C0),
             Color(0xFF0D47A1)
         ),
-        tickLabels = listOf(
-            ".05", ".1", ".2", ".5", "1", "2", "3", "5", "7", "≥10 mm"
-        )
+        tickLabels = if (units.imperial) {
+            listOf(0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0).map {
+                units.value(it, WeatherUnit.PRECIPITATION, 3).removePrefix("0")
+            } + "≥${units.value(10.0, WeatherUnit.PRECIPITATION, 3).removePrefix("0")}"
+        } else listOf(".05", ".1", ".2", ".5", "1", "2", "3", "5", "7", "≥10"),
+        unitLabel = units.precipitationUnit
     )
 }
 
@@ -1264,7 +1412,7 @@ private fun HourlyPrecipitationLegend() {
  * modéré/fort" s'estompent perceptivement).
  */
 @Composable
-private fun HourlyWindLegend() {
+private fun HourlyWindLegend(units: WeatherUnits = LocalWeatherUnits.current) {
     Column {
         HeatmapGradientLegend(
             colors = listOf(
@@ -1274,8 +1422,9 @@ private fun HourlyWindLegend() {
                 Color(0xFFC62828)
             ),
             tickLabels = listOf(
-                "20", "30", "40", "50", "60", "70", "80", "90", "100", "≥120 km/h"
-            )
+                *listOf(20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0).map { units.value(it, WeatherUnit.WIND_SPEED) }.toTypedArray(), "≥${units.value(120.0, WeatherUnit.WIND_SPEED)}"
+            ),
+            unitLabel = units.windUnit
         )
         WindGustLegendHint()
     }
@@ -1309,7 +1458,8 @@ private fun HourlyWindLegend() {
 @Composable
 private fun HeatmapGradientLegend(
     colors: List<Color>,
-    tickLabels: List<String>
+    tickLabels: List<String>,
+    unitLabel: String? = null
 ) {
     require(colors.size == tickLabels.size) {
         "colors and tickLabels must have same size (got ${colors.size} vs ${tickLabels.size})"
@@ -1319,6 +1469,11 @@ private fun HeatmapGradientLegend(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
+        if (unitLabel != null) {
+            Text(unitLabel, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.End))
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1362,13 +1517,14 @@ internal fun TodaySummaryCard(
     expanded: Boolean = true,
     onExpandedChange: (Boolean) -> Unit = {},
     onConfidenceClick: () -> Unit = {},
-    forecast: CityForecast? = null
+    forecast: CityForecast? = null,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val resources = LocalResources.current
     val baseDescription = A11yFormatter
-        .todaySummaryDescription(resources, today, modelCount)
+        .todaySummaryDescription(resources, today, modelCount, units = units)
     val a11yDescription = if (currentTemp != null) {
-        resources.getString(R.string.a11y_now_temp, currentTemp.roundToInt()) + ". $baseDescription"
+        com.meteocompare.app.core.units.weatherString(resources, units, R.string.a11y_now_temp, currentTemp) + ". $baseDescription"
     } else baseDescription
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val weatherAccent = WeatherAccent.of(currentCondition, isDark)
@@ -1441,7 +1597,7 @@ internal fun TodaySummaryCard(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = currentTemp?.let { "${it.roundToInt()}°" } ?: "—",
+                                text = currentTemp?.let { units.temp(it) } ?: "—",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Medium
                             )
@@ -1617,7 +1773,7 @@ private fun DetailMetricGrid(
                         fallbackMin = score.minValue,
                         fallbackMax = score.maxValue,
                         samples = samples.tempMin,
-                        unit = "°",
+                        unit = WeatherUnit.TEMPERATURE_COMPACT,
                         digits = 1,
                         convergence = score.convergencePercent,
                         centralTestTag = TAG_TODAY_SUMMARY_TEMP_MIN_CENTRAL,
@@ -1638,7 +1794,7 @@ private fun DetailMetricGrid(
                         fallbackMin = score.minValue,
                         fallbackMax = score.maxValue,
                         samples = samples.tempMax,
-                        unit = "°",
+                        unit = WeatherUnit.TEMPERATURE_COMPACT,
                         digits = 1,
                         convergence = score.convergencePercent,
                         centralTestTag = TAG_TODAY_SUMMARY_TEMP_MAX_CENTRAL,
@@ -1674,7 +1830,7 @@ private fun DetailMetricGrid(
                     fallbackMin = rain.min,
                     fallbackMax = rain.max,
                     samples = samples.precipitation,
-                    unit = " mm",
+                    unit = WeatherUnit.PRECIPITATION,
                     digits = 1,
                     convergence = precipitation.amountConvergencePercent,
                     nonNegative = true,
@@ -1715,7 +1871,7 @@ private fun DetailMetricGrid(
                         fallbackMin = score.minValue,
                         fallbackMax = score.maxValue,
                         samples = samples.wind,
-                        unit = " km/h",
+                        unit = WeatherUnit.WIND_SPEED,
                         digits = 0,
                         convergence = score.convergencePercent,
                         nonNegative = true,
@@ -1738,7 +1894,7 @@ private fun DetailMetricGrid(
                         fallbackMin = score.minValue,
                         fallbackMax = score.maxValue,
                         samples = samples.windGust,
-                        unit = " km/h",
+                        unit = WeatherUnit.WIND_SPEED,
                         digits = 0,
                         convergence = score.convergencePercent,
                         nonNegative = true,
@@ -1890,7 +2046,8 @@ private fun precipitationDispersionPresentation(
 @Composable
 private fun RainModelSummary(
     presentation: PrecipitationDispersionPresentation,
-    accent: Color
+    accent: Color,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     if (presentation.modelCount <= 0) return
     val locale = LocalLocale.current.platformLocale
@@ -1919,7 +2076,7 @@ private fun RainModelSummary(
                 Text(
                     text = stringResource(
                         R.string.metric_precip_if_rain,
-                        formatDispersionValue(amount, " mm", 1, locale)
+                        formatDispersionValue(amount, WeatherUnit.PRECIPITATION, 1, locale, units = units)
                     ),
                     style = MaterialTheme.typography.labelSmall,
                     color = accent,
@@ -2011,14 +2168,15 @@ private fun DispersionMetricRow(
     fallbackMin: Double,
     fallbackMax: Double,
     samples: List<DispersionSample>,
-    unit: String,
+    unit: WeatherUnit,
     digits: Int,
     convergence: Int?,
     subLabel: String? = null,
     nonNegative: Boolean = false,
     domainOverride: DispersionDomain? = null,
     centralTestTag: String? = null,
-    convergenceTestTag: String? = null
+    convergenceTestTag: String? = null,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val locale = LocalLocale.current.platformLocale
     val sampleValues = samples.map(DispersionSample::value).filter { it.isFinite() }
@@ -2031,12 +2189,12 @@ private fun DispersionMetricRow(
     val safeMin = listOf(rawMin, central).filter(Double::isFinite).minOrNull() ?: central
     val safeMax = listOf(rawMax, central).filter(Double::isFinite).maxOrNull() ?: central
     val domain = domainOverride ?: paddedDispersionDomain(safeMin, safeMax, nonNegative)
-    val rangeLabel = "${formatDispersionValue(safeMin, unit, digits, locale)} – " +
-        formatDispersionValue(safeMax, unit, digits, locale)
-    val centralLabel = formatDispersionValue(central, unit, digits, locale)
+    val rangeLabel = "${formatDispersionValue(safeMin, unit, digits, locale, units = units)} – " +
+        formatDispersionValue(safeMax, unit, digits, locale, units = units)
+    val centralLabel = formatDispersionValue(central, unit, digits, locale, units = units)
     val railDescription = if (samples.isNotEmpty()) {
         "$semanticLabel · " + samples.joinToString(" · ") { sample ->
-            "${sample.model.displayName} ${formatDispersionValue(sample.value, unit, digits, locale)}"
+            "${sample.model.displayName} ${formatDispersionValue(sample.value, unit, digits, locale, units = units)}"
         }
     } else {
         "$semanticLabel · $rangeLabel"
@@ -2089,8 +2247,8 @@ private fun DispersionMetricRow(
         )
 
         DispersionBoundsLabels(
-            minLabel = formatDispersionValue(safeMin, unit, digits, locale),
-            maxLabel = formatDispersionValue(safeMax, unit, digits, locale),
+            minLabel = formatDispersionValue(safeMin, unit, digits, locale, units = units),
+            maxLabel = formatDispersionValue(safeMax, unit, digits, locale, units = units),
             min = safeMin,
             max = safeMax,
             domain = domain
@@ -2274,17 +2432,12 @@ private fun DispersionRail(
 
 private fun formatDispersionValue(
     value: Double,
-    unit: String,
+    unit: WeatherUnit,
     digits: Int,
-    locale: Locale
+    locale: Locale,
+    units: WeatherUnits
 ): String {
-    if (!value.isFinite()) return "—"
-    val number = if (digits <= 0) {
-        value.roundToInt().toString()
-    } else {
-        String.format(locale, "%.${digits}f", value)
-    }
-    return "$number$unit"
+    return units.format(value, unit, digits, locale)
 }
 
 @Composable
@@ -2356,6 +2509,7 @@ private fun PartialErrorsSection(errors: Map<WeatherModel, String>) {
 internal const val TAG_DETAIL_LOADING = "detail_loading"
 internal const val TAG_DETAIL_ERROR = "detail_error"
 internal const val TAG_DETAIL_LOADED = "detail_loaded"
+internal const val TAG_RADAR_ACTION = "radar_action"
 internal const val TAG_ENGINE_COMPARISON_ACTION = "engine_comparison_action"
 internal const val TAG_GRAPHIC_VIEW_ACTION = "graphic_view_action"
 internal const val TAG_CONFIDENCE_BADGE = "confidence_badge"
@@ -2526,12 +2680,12 @@ private fun windStyle(kmh: Double): ValueStyle? = when {
  * proposé dans les Réglages, pour ne pas attendre deux semaines de collecte.
  */
 @Composable
-private fun BiasHistoryHint(
+internal fun BiasHistoryHint(
     progress: BiasHistoryProgress,
+    refreshState: BiasHistoryRefreshState,
     onRequestHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var requested by rememberSaveable { mutableStateOf(false) }
     val target = ModelBias.MIN_SAMPLES_FOR_BIAS
     Row(
         modifier = modifier
@@ -2577,18 +2731,19 @@ private fun BiasHistoryHint(
                 )
             }
             TextButton(
-                onClick = {
-                    requested = true
-                    onRequestHistory()
-                },
-                enabled = !requested,
+                onClick = onRequestHistory,
+                enabled = !refreshState.isActive,
                 contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
                 modifier = Modifier.testTag(TAG_BIAS_HISTORY_FETCH)
             ) {
                 Text(
                     text = stringResource(
-                        if (requested) R.string.bias_history_fetch_requested
-                        else R.string.bias_history_fetch_action
+                        when (refreshState) {
+                            BiasHistoryRefreshState.QUEUED -> R.string.bias_history_fetch_queued
+                            BiasHistoryRefreshState.RUNNING -> R.string.bias_history_fetch_requested
+                            BiasHistoryRefreshState.FAILED -> R.string.action_retry
+                            else -> R.string.bias_history_fetch_action
+                        }
                     ),
                     style = MaterialTheme.typography.labelLarge
                 )

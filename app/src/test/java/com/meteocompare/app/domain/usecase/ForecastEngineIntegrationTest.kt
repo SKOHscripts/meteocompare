@@ -1,5 +1,9 @@
 package com.meteocompare.app.domain.usecase
 
+import com.meteocompare.app.core.units.WeatherUnit
+import com.meteocompare.app.core.units.WeatherUnits
+import com.meteocompare.app.domain.model.UnitSystem
+
 import com.meteocompare.app.domain.model.City
 import com.meteocompare.app.domain.model.CityForecast
 import com.meteocompare.app.domain.model.DailyForecast
@@ -185,9 +189,9 @@ class ForecastEngineIntegrationTest {
     }
 
     @Test
-    fun `engine comparison uses same forecast filters past days and is limited to seven days`() {
+    fun `engine comparison uses same forecast filters past days and is limited to ten days`() {
         val now = Instant.parse("2026-08-23T05:00:00Z") // 07:00 Europe/Paris
-        val dates = (22..31).map { LocalDate.of(2026, 8, it) }
+        val dates = List(11) { LocalDate.of(2026, 8, 22).plusDays(it.toLong()) }
         val forecast = dailyForecast(dates)
         val calibration = forecast.seriesByModel.keys.associateWith { profile(bias = 2.0) }
         val context = ForecastEngineContext(
@@ -210,9 +214,9 @@ class ForecastEngineIntegrationTest {
         val days = EngineComparisonBuilder(calculator).build(forecast, context, now)
 
         assertEquals(sourceSnapshot, forecast)
-        assertEquals(7, days.size)
+        assertEquals(10, days.size)
         assertEquals(LocalDate.of(2026, 8, 23), days.first().date)
-        assertEquals(LocalDate.of(2026, 8, 29), days.last().date)
+        assertEquals(LocalDate.of(2026, 9, 1), days.last().date)
         days.forEach { day ->
             assertEquals(ForecastEngine.entries.toSet(), day.byEngine.keys)
             assertTrue(day.divergence.score >= 0.0)
@@ -406,4 +410,27 @@ class ForecastEngineIntegrationTest {
             }
         )
     }
+    @Test
+    fun `display unit switches preserve every engine forecast and raw model data`() {
+        val date = LocalDate.of(2026, 8, 24)
+        val forecast = dailyForecast(listOf(date), fetchedAt = Instant.parse("2026-08-23T05:00:00Z"))
+        val rawBefore = forecast.toString()
+        ForecastEngine.entries.forEach { engine ->
+            val context = ForecastEngineContext(engine = engine)
+            val before = calculator.dayConfidence(forecast, date, context)
+            listOf(UnitSystem.METRIC, UnitSystem.IMPERIAL, UnitSystem.METRIC).forEach { system ->
+                val units = WeatherUnits(system)
+                before.tempMax?.let { score ->
+                    units.temp(score.centralValue)
+                    units.format(score.spread, WeatherUnit.TEMPERATURE, delta = true)
+                }
+                before.tempMin?.let { units.temp(it.centralValue) }
+                before.windMax?.let { units.speed(it.centralValue) }
+                val after = calculator.dayConfidence(forecast, date, context)
+                assertEquals(before, after)
+                assertEquals(rawBefore, forecast.toString())
+            }
+        }
+    }
+
 }

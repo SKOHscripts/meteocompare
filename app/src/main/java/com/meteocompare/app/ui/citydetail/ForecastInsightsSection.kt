@@ -37,12 +37,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringResource
+import com.meteocompare.app.core.units.weatherStringResource as stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.meteocompare.app.R
+import com.meteocompare.app.core.locale.evolutionHighlightTitleRes
 import com.meteocompare.app.core.locale.weatherConditionLabelRes
 import com.meteocompare.app.domain.model.ForecastEvolutionHighlight
 import com.meteocompare.app.domain.model.ForecastEvolutionTrend
@@ -332,7 +333,7 @@ private fun EvolutionHighlightRow(highlight: ForecastEvolutionHighlight) {
         ForecastEvolutionVariable.PRECIPITATION -> Icons.Outlined.WaterDrop
         ForecastEvolutionVariable.WIND -> Icons.Outlined.Air
     }
-    val title = stringResource(evolutionHighlightTitle(highlight))
+    val title = stringResource(evolutionHighlightTitleRes(highlight))
     val date = highlight.targetDate.format(DateTimeFormatter.ofPattern("EEE d"))
     Row(
         modifier = Modifier
@@ -382,20 +383,6 @@ private fun EvolutionHighlightRow(highlight: ForecastEvolutionHighlight) {
             )
         }
     }
-}
-
-/** Libellé d'un signal d'évolution, partagé avec les notifications de changement de prévision. */
-internal fun evolutionHighlightTitle(highlight: ForecastEvolutionHighlight): Int = when {
-    highlight.trend == ForecastEvolutionTrend.VOLATILE -> R.string.forecast_evolution_highlight_volatile
-    highlight.variable == ForecastEvolutionVariable.TEMPERATURE &&
-        highlight.trend == ForecastEvolutionTrend.INCREASING -> R.string.forecast_evolution_highlight_temp_up
-    highlight.variable == ForecastEvolutionVariable.TEMPERATURE -> R.string.forecast_evolution_highlight_temp_down
-    highlight.variable == ForecastEvolutionVariable.PRECIPITATION &&
-        highlight.trend == ForecastEvolutionTrend.INCREASING -> R.string.forecast_evolution_highlight_precip_up
-    highlight.variable == ForecastEvolutionVariable.PRECIPITATION -> R.string.forecast_evolution_highlight_precip_down
-    highlight.variable == ForecastEvolutionVariable.WIND &&
-        highlight.trend == ForecastEvolutionTrend.INCREASING -> R.string.forecast_evolution_highlight_wind_up
-    else -> R.string.forecast_evolution_highlight_wind_down
 }
 
 @Composable
@@ -604,14 +591,16 @@ private fun forecastInsightMetrics(insight: ForecastInsight): List<InsightMetric
                 add(
                     InsightMetric(
                         icon = Icons.Outlined.Air,
-                        text = stringResource(R.string.forecast_insight_metric_wind_range, min, max)
+                        text = stringResource(R.string.forecast_insight_metric_wind_range,
+                            evidence.minimumValue, evidence.maximumValue)
                     )
                 )
             } else target?.let { targetWind ->
                 add(
                     InsightMetric(
                         icon = Icons.Outlined.Air,
-                        text = stringResource(R.string.forecast_insight_metric_wind, targetWind)
+                        text = stringResource(R.string.forecast_insight_metric_wind,
+                            insight.point?.windKmh ?: targetWind.toDouble())
                     )
                 )
             }
@@ -634,14 +623,16 @@ private fun forecastInsightMetrics(insight: ForecastInsight): List<InsightMetric
                         icon = Icons.Outlined.Thermostat,
                         text = stringResource(
                             R.string.forecast_insight_metric_temperature_scenarios,
-                            min,
-                            max
+                            evidence.minimumValue,
+                            evidence.maximumValue
                         )
                     )
                 )
             } else {
-                val reference = insight.referenceValue
-                val target = insight.targetValue
+                val reference = insight.referencePoint?.temperatureC
+                    ?: insight.referencePoint?.tempMaxC ?: insight.referenceValue?.toDouble()
+                val target = insight.point?.temperatureC
+                    ?: insight.point?.tempMaxC ?: insight.targetValue?.toDouble()
                 if (reference != null && target != null) {
                     add(
                         InsightMetric(

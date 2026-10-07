@@ -1,5 +1,6 @@
 package com.meteocompare.app.data.repository
 
+import com.meteocompare.app.R
 import com.meteocompare.app.core.network.ApiResult
 import com.meteocompare.app.core.network.NetworkMonitor
 import com.meteocompare.app.data.local.ForecastCacheDao
@@ -9,6 +10,7 @@ import com.meteocompare.app.data.remote.EnsembleApi
 import com.meteocompare.app.data.remote.OpenMeteoApi
 import com.meteocompare.app.data.remote.dto.BatchedForecastResponseDto
 import com.meteocompare.app.data.remote.dto.ForecastResponseDto
+import com.meteocompare.app.data.remote.dto.DailyDto
 import com.meteocompare.app.data.remote.dto.HourlyDto
 import com.meteocompare.app.domain.model.City
 import com.meteocompare.app.domain.model.WeatherModel
@@ -31,10 +33,14 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.HttpException
+import retrofit2.Response
 
 /**
  * Tests du [ForecastRepositoryImpl] en mode BATCHED (post-optimisation
@@ -72,7 +78,7 @@ class ForecastRepositoryImplTest {
     )
 
     /**
-     * DTO minimal utilisé pour peupler le cache Room dans les tests qui
+     * DTO couvrant l’horizon réseau de onze jours pour peupler le cache des tests qui
      * simulent un cache présent. Il n'a pas besoin d'être suffixé — le
      * cache stocke des DTOs unitaires (un par modèle), le splitter
      * n'intervient qu'en amont sur la réponse réseau.
@@ -84,6 +90,11 @@ class ForecastRepositoryImplTest {
         hourly = HourlyDto(
             time = listOf("2026-06-23T00:00"),
             temperature2m = listOf(20.0)
+        ),
+        daily = DailyDto(
+            time = List(11) { java.time.LocalDate.of(2026, 6, 23).plusDays(it.toLong()).toString() },
+            temperature2mMax = List(11) { 24.0 },
+            temperature2mMin = List(11) { 14.0 }
         )
     )
 
@@ -97,7 +108,13 @@ class ForecastRepositoryImplTest {
             every { isOnline() } returns true
         }
         val context: android.content.Context = mockk(relaxed = true) {
-            every { getString(any<Int>()) } returns "stubbed-error"
+            every { getString(any<Int>()) } answers {
+                when (firstArg<Int>()) {
+                    R.string.error_location_not_supported_by_model -> "unsupported-model-location"
+                    R.string.error_location_not_supported_by_models -> "unsupported-models-location"
+                    else -> "stubbed-error"
+                }
+            }
             every { getString(any<Int>(), *anyVararg()) } returns "stubbed-error"
         }
         repository = ForecastRepositoryImpl(
@@ -113,6 +130,148 @@ class ForecastRepositoryImplTest {
             ioDispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
             computationDispatcher = kotlinx.coroutines.Dispatchers.Unconfined
         )
+    }
+
+    /** Cache réel en mémoire : les lecteurs suivants voient les écritures du fetch. */
+    private fun installMutableCache(days: Int) {
+        fun dto(count: Int) = sampleDto.copy(daily = DailyDto(
+            time = List(count) { java.time.LocalDate.of(2026, 6, 23).plusDays(it.toLong()).toString() },
+            temperature2mMax = List(count) { 22.0 },
+            temperature2mMin = List(count) { 12.0 }
+        ))
+        var rows = listOf(ForecastCacheEntity(
+            cityId = paris.id, modelKey = WeatherModel.GFS.apiKey,
+            fetchedAtEpochMs = System.currentTimeMillis(),
+            responseJson = json.encodeToString(ForecastResponseDto.serializer(), dto(days))
+        ))
+        coEvery { cacheDao.getForCity(paris.id) } coAnswers { rows }
+        coEvery { cacheDao.replaceRequestedModels(any(), any(), any(), any()) } coAnswers {
+            rows = thirdArg<List<ForecastCacheEntity>>()
+        }
+        coEvery {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        } returns json.decodeFromString(
+            BatchedForecastResponseDto.serializer(),
+            json.encodeToString(ForecastResponseDto.serializer(), dto(10))
+        )
+    }
+
+    @Test
+    fun `automatic load rechecks cache after a slow cached emission`() = runTest {
+        installMutableCache(7)
+        val held = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val slowResults = mutableListOf<ApiResult<com.meteocompare.app.domain.model.CityForecast>>()
+        val slow = launch {
+            repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L)
+                .collect { result ->
+                    slowResults += result
+                    if (slowResults.size == 1) {
+                        held.complete(Unit)
+                        release.await()
+                    }
+                }
+        }
+        held.await()
+        repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        release.complete(Unit)
+        slow.join()
+
+        coVerify(exactly = 1) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        val final = (slowResults.last() as ApiResult.Success).data
+        assertEquals(10, final.seriesByModel.getValue(WeatherModel.GFS).daily.dates.size)
+    }
+
+    @Test
+    fun `fresh automatic cache does not suppress later explicit refreshes`() = runTest {
+        installMutableCache(10)
+        repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        coVerify(exactly = 0) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        repository.refreshCityForecast(paris, listOf(WeatherModel.GFS), 10)
+        repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, true, 3_600_000L).toList()
+        repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, null).toList()
+        coVerify(exactly = 3) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `explicit refresh joins the network request of an automatic load`() = runTest {
+        val fakeApi = GatedForecastApi(batchedResponseWith(listOf(WeatherModel.GFS)))
+        val repo = repositoryWith(fakeApi)
+        val automatic = async(start = CoroutineStart.UNDISPATCHED) {
+            repo.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        }
+        val explicit = async(start = CoroutineStart.UNDISPATCHED) {
+            repo.refreshCityForecast(paris, listOf(WeatherModel.GFS), 10)
+        }
+        fakeApi.release()
+        assertEquals(automatic.await().single(), explicit.await())
+        assertEquals(1, fakeApi.callCount.get())
+    }
+
+    @Test
+    fun `concurrent automatic loads share partial responses without retrying`() = runTest {
+        val fakeApi = GatedForecastApi(batchedResponseWith(listOf(WeatherModel.GFS)))
+        val repo = repositoryWith(fakeApi)
+        val models = listOf(WeatherModel.GFS, WeatherModel.ICON_EU)
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            repo.getCityForecastStream(paris, models, 10, false, 3_600_000L).toList()
+        }
+        val second = async(start = CoroutineStart.UNDISPATCHED) {
+            repo.getCityForecastStream(paris, models, 10, false, 3_600_000L).toList()
+        }
+        fakeApi.release()
+        assertEquals(first.await(), second.await())
+        assertEquals(1, fakeApi.callCount.get())
+    }
+
+    @Test
+    fun `cancelled automatic collector leaves shared fetch available to other consumers`() = runTest {
+        val fakeApi = GatedForecastApi(batchedResponseWith(listOf(WeatherModel.GFS)))
+        val repo = repositoryWith(fakeApi)
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            repo.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        }
+        val second = async(start = CoroutineStart.UNDISPATCHED) {
+            repo.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        }
+        first.cancel()
+        fakeApi.release()
+        assertTrue(second.await().single() is ApiResult.Success)
+        assertEquals(1, fakeApi.callCount.get())
+        // Le registre est nettoyé : un appel explicite ultérieur repart bien sur le réseau.
+        repo.refreshCityForecast(paris, listOf(WeatherModel.GFS), 10)
+        assertEquals(2, fakeApi.callCount.get())
+    }
+
+    @Test
+    fun `concurrent automatic failures are shared and a later load can retry`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        } coAnswers { gate.await(); throw IOException("offline") }
+        coEvery { cacheDao.getForCity(any()) } returns emptyList()
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        }
+        val second = async(start = CoroutineStart.UNDISPATCHED) {
+            repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        }
+        gate.complete(Unit)
+        assertTrue(first.await().single() is ApiResult.Error)
+        assertTrue(second.await().single() is ApiResult.Error)
+        coVerify(exactly = 1) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        repository.getCityForecastStream(paris, listOf(WeatherModel.GFS), 10, false, 3_600_000L).toList()
+        coVerify(exactly = 2) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     // ─────────────────────── Tests refresh de base ───────────────────────
@@ -293,6 +452,116 @@ class ForecastRepositoryImplTest {
             assertEquals(1, result.data.errors.size)
             assertTrue(WeatherModel.GFS in result.data.errors)
         }
+
+    @Test
+    fun `refresh mixte hors zone - retente uniquement les modeles globaux selectionnes`() = runTest {
+        val mixedModels = listOf(WeatherModel.AROME_FRANCE_HD, WeatherModel.GFS, WeatherModel.JMA_GSM)
+        val mixedParam = mixedModels.joinToString(",") { it.apiKey }
+        val globalParam = listOf(WeatherModel.GFS, WeatherModel.JMA_GSM)
+            .joinToString(",") { it.apiKey }
+
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(mixedParam), any(), any(), any(), any(), any(), any(), any()
+            )
+        } throws IOException("No data is available for this location")
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(globalParam), any(), any(), any(), any(), any(), any(), any()
+            )
+        } returns batchedResponseWith(listOf(WeatherModel.GFS, WeatherModel.JMA_GSM))
+
+        val result = repository.refreshCityForecast(
+            city = paris.copy(name = "Tokyo", country = "Japan", latitude = 35.6762, longitude = 139.6503),
+            models = mixedModels
+        )
+
+        assertTrue(result is ApiResult.Success)
+        result as ApiResult.Success
+        assertEquals(setOf(WeatherModel.GFS, WeatherModel.JMA_GSM), result.data.seriesByModel.keys)
+        assertTrue(WeatherModel.AROME_FRANCE_HD in result.data.errors)
+        coVerify(exactly = 1) {
+            api.getForecastBatched(
+                any(), any(), eq(mixedParam), any(), any(), any(), any(), any(), any(), any()
+            )
+        }
+        coVerify(exactly = 1) {
+            api.getForecastBatched(
+                any(), any(), eq(globalParam), any(), any(), any(), any(), any(), any(), any()
+            )
+        }
+    }
+
+    @Test
+    fun `refresh modele regional hors couverture - transforme le 400 localisation en message metier`() = runTest {
+        val austin = paris.copy(
+            name = "Austin",
+            country = "United States",
+            latitude = 30.2672,
+            longitude = -97.7431
+        )
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(WeatherModel.AROME_FRANCE_HD.apiKey),
+                any(), any(), any(), any(), any(), any(), any()
+            )
+        } throws openMeteoBadRequest("No data is available for this location")
+
+        val result = repository.refreshCityForecast(
+            city = austin,
+            models = listOf(WeatherModel.AROME_FRANCE_HD)
+        )
+
+        assertTrue(result is ApiResult.Error)
+        result as ApiResult.Error
+        assertEquals("unsupported-model-location", result.message)
+    }
+
+    @Test
+    fun `refresh autre 400 - conserve une erreur technique`() = runTest {
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(WeatherModel.AROME_FRANCE_HD.apiKey),
+                any(), any(), any(), any(), any(), any(), any()
+            )
+        } throws openMeteoBadRequest("Invalid value for forecast_days")
+
+        val result = repository.refreshCityForecast(
+            city = paris,
+            models = listOf(WeatherModel.AROME_FRANCE_HD)
+        )
+
+        assertTrue(result is ApiResult.Error)
+        result as ApiResult.Error
+        assertEquals("stubbed-error", result.message)
+    }
+
+    @Test
+    fun `refresh mixte reponse vide - retente les globaux pour eviter un ecran en erreur`() = runTest {
+        val mixedModels = listOf(WeatherModel.ICON_EU, WeatherModel.GFS)
+        val mixedParam = mixedModels.joinToString(",") { it.apiKey }
+
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(mixedParam), any(), any(), any(), any(), any(), any(), any()
+            )
+        } returns batchedResponseWith(emptyList())
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(WeatherModel.GFS.apiKey), any(), any(), any(), any(), any(), any(), any()
+            )
+        } returns batchedResponseWith(listOf(WeatherModel.GFS))
+
+        val result = repository.refreshCityForecast(
+            city = paris.copy(name = "Sydney", country = "Australia", latitude = -33.8688, longitude = 151.2093),
+            models = mixedModels
+        )
+
+        assertTrue(result is ApiResult.Success)
+        result as ApiResult.Success
+        assertEquals(setOf(WeatherModel.GFS), result.data.seriesByModel.keys)
+        assertTrue(WeatherModel.ICON_EU in result.data.errors)
+    }
 
     @Test
     fun `refresh - ecrit les modeles reussis dans le cache en un lot`() = runTest {
@@ -533,7 +802,8 @@ class ForecastRepositoryImplTest {
     @Test
     fun `cache recent physiquement vide est ignore et ne bloque pas le reseau`() = runTest {
         val invalidDto = sampleDto.copy(
-            hourly = sampleDto.hourly?.copy(temperature2m = listOf(999.0))
+            hourly = sampleDto.hourly?.copy(temperature2m = listOf(999.0)),
+            daily = null
         )
         coEvery { cacheDao.getForCity(paris.id) } returns listOf(
             ForecastCacheEntity(
@@ -624,6 +894,86 @@ class ForecastRepositoryImplTest {
             }
             coVerify(exactly = 0) { evolutionRecorder.record(any()) }
         }
+
+    @Test
+    fun `stream cache 7 jours recent refetch quand 10 jours sont demandes`() = runTest {
+        val dates = (23..29).map { day -> "2026-06-${day.toString().padStart(2, '0')}" }
+        val sevenDayDto = sampleDto.copy(
+            daily = DailyDto(
+                time = dates,
+                temperature2mMax = List(7) { 24.0 },
+                temperature2mMin = List(7) { 14.0 },
+                precipitationSum = List(7) { 0.0 },
+                windSpeed10mMax = List(7) { 15.0 },
+                weatherCode = List(7) { 1 }
+            )
+        )
+        val cachedEntity = ForecastCacheEntity(
+            cityId = paris.id,
+            modelKey = WeatherModel.GFS.apiKey,
+            fetchedAtEpochMs = System.currentTimeMillis() - 5_000L,
+            responseJson = json.encodeToString(ForecastResponseDto.serializer(), sevenDayDto)
+        )
+        coEvery { cacheDao.getForCity(paris.id) } returns listOf(cachedEntity)
+
+        val forecastDaysSlot = slot<Int>()
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), any(), any(), any(), any(),
+                capture(forecastDaysSlot), any(), any(), any()
+            )
+        } returns batchedResponseWith(modelsWithData = listOf(WeatherModel.GFS))
+
+        val emissions = repository.getCityForecastStream(
+            city = paris,
+            models = listOf(WeatherModel.GFS),
+            forecastDays = 10,
+            maxCacheAgeMs = 60 * 60 * 1000L
+        ).toList()
+
+        assertEquals("Le cache 7 j est affiché puis étendu par le réseau", 2, emissions.size)
+        assertEquals(10, forecastDaysSlot.captured)
+        coVerify(exactly = 1) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `stream cache 10 jours recent ne refetch pas pour une demande 10 jours`() = runTest {
+        val dates = (0 until 10).map { offset ->
+            java.time.LocalDate.of(2026, 6, 23).plusDays(offset.toLong()).toString()
+        }
+        val tenDayDto = sampleDto.copy(
+            daily = DailyDto(
+                time = dates,
+                temperature2mMax = List(10) { 24.0 },
+                temperature2mMin = List(10) { 14.0 },
+                precipitationSum = List(10) { 0.0 },
+                windSpeed10mMax = List(10) { 15.0 },
+                weatherCode = List(10) { 1 }
+            )
+        )
+        coEvery { cacheDao.getForCity(paris.id) } returns listOf(
+            ForecastCacheEntity(
+                cityId = paris.id,
+                modelKey = WeatherModel.GFS.apiKey,
+                fetchedAtEpochMs = System.currentTimeMillis() - 5_000L,
+                responseJson = json.encodeToString(ForecastResponseDto.serializer(), tenDayDto)
+            )
+        )
+
+        val emissions = repository.getCityForecastStream(
+            city = paris,
+            models = listOf(WeatherModel.GFS),
+            forecastDays = 10,
+            maxCacheAgeMs = 60 * 60 * 1000L
+        ).toList()
+
+        assertEquals(1, emissions.size)
+        coVerify(exactly = 0) {
+            api.getForecastBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
 
     @Test
     fun `stream traite un cache date dans le futur comme recent apres recul dhorloge`() =
@@ -893,18 +1243,6 @@ class ForecastRepositoryImplTest {
         assertTrue(WeatherModel.ICON_D2 in forecast.seriesByModel)
     }
 
-    // ─────────────────────── Helpers ───────────────────────────────────────
-
-    /**
-     * Construit une [BatchedForecastResponseDto] où [modelsWithData] ont des
-     * températures horaires valides (donc considérés "usables" par le
-     * splitter). Les autres modèles éventuellement passés à la fonction ne
-     * sont pas dans la réponse — le splitter les filtrera automatiquement,
-     * ce qui produit des erreurs par-modèle côté repo.
-     *
-     * Réponse minimale : 1 pas de temps + temperature_2m. C'est le contrat
-     * du splitter pour "usable data".
-     */
     // ─────────────────── Endpoint Ensemble (WeatherNext 2) ───────────────────
 
     @Test
@@ -1032,6 +1370,46 @@ class ForecastRepositoryImplTest {
         coVerify(exactly = 0) { cacheDao.replaceRequestedModels(any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `retry global hors zone - le lot d'ensemble reste separe et n'est pas retente`() = runTest {
+        val forecastParam = listOf(WeatherModel.AROME_FRANCE_HD, WeatherModel.GFS)
+            .joinToString(",") { it.apiKey }
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(forecastParam), any(), any(), any(), any(), any(), any(), any()
+            )
+        } throws IOException("No data is available for this location")
+        coEvery {
+            api.getForecastBatched(
+                any(), any(), eq(WeatherModel.GFS.apiKey), any(), any(), any(), any(), any(), any(), any()
+            )
+        } returns batchedResponseWith(listOf(WeatherModel.GFS))
+        coEvery {
+            ensembleApi.getEnsembleBatched(
+                any(), any(), eq(WeatherModel.GOOGLE_WEATHERNEXT2.apiKey),
+                any(), any(), any(), any(), any(), any(), any()
+            )
+        } returns ensembleControlResponse(controlTemperature = 27.0)
+
+        val result = repository.refreshCityForecast(
+            city = paris.copy(name = "Tokyo", country = "Japan", latitude = 35.6762, longitude = 139.6503),
+            models = listOf(WeatherModel.AROME_FRANCE_HD, WeatherModel.GFS, WeatherModel.GOOGLE_WEATHERNEXT2)
+        )
+
+        assertTrue(result is ApiResult.Success)
+        result as ApiResult.Success
+        assertEquals(
+            setOf(WeatherModel.GFS, WeatherModel.GOOGLE_WEATHERNEXT2),
+            result.data.seriesByModel.keys
+        )
+        assertEquals(setOf(WeatherModel.AROME_FRANCE_HD), result.data.errors.keys)
+        coVerify(exactly = 1) {
+            ensembleApi.getEnsembleBatched(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    // ─────────────────────── Helpers ───────────────────────────────────────
+
     /**
      * Réponse de l'Ensemble API pour un seul modèle : variables non suffixées
      * pour le membre de contrôle, suffixe `_memberNN` pour les autres membres.
@@ -1052,6 +1430,16 @@ class ForecastRepositoryImplTest {
             }"""
         )
 
+    /**
+     * Construit une [BatchedForecastResponseDto] où [modelsWithData] ont des
+     * températures horaires valides (donc considérés "usables" par le
+     * splitter). Les autres modèles éventuellement passés à la fonction ne
+     * sont pas dans la réponse — le splitter les filtrera automatiquement,
+     * ce qui produit des erreurs par-modèle côté repo.
+     *
+     * Réponse minimale : 1 pas de temps + temperature_2m. C'est le contrat
+     * du splitter pour "usable data".
+     */
     private fun batchedResponseWith(
         modelsWithData: List<WeatherModel>
     ): BatchedForecastResponseDto {
@@ -1263,4 +1651,11 @@ class ForecastRepositoryImplTest {
 
         assertEquals(1, fakeApi.callCount.get())
     }
+
+    private fun openMeteoBadRequest(reason: String): HttpException {
+        val body = """{"error":true,"reason":"$reason"}"""
+            .toResponseBody("application/json".toMediaType())
+        return HttpException(Response.error<BatchedForecastResponseDto>(400, body))
+    }
+
 }

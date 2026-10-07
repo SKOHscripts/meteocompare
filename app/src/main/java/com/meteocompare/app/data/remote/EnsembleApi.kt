@@ -34,9 +34,10 @@ import retrofit2.http.Query
 interface EnsembleApi {
 
     /**
-     * Même contrat que [OpenMeteoApi.getForecastBatched]. Le repository passe
-     * le même `forecast_days` que pour la Forecast API : les deux réponses
-     * partagent ainsi le même axe temporel local.
+     * Même contrat que [OpenMeteoApi.getForecastBatched]. Le repository borne
+     * `forecast_days` de la même façon que pour la Forecast API (horizon
+     * demandé, plafonné par les modèles du lot) : les deux réponses partent
+     * du même jour local.
      */
     @GET("v1/ensemble")
     suspend fun getEnsembleBatched(

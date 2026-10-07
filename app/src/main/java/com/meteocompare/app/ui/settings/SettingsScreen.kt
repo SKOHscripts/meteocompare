@@ -1,11 +1,20 @@
 package com.meteocompare.app.ui.settings
 
+import com.meteocompare.app.core.units.WeatherUnit
+import com.meteocompare.app.core.units.WeatherUnits
+import com.meteocompare.app.core.units.LocalWeatherUnits
+
+import androidx.compose.foundation.selection.selectable
+
+import com.meteocompare.app.domain.model.UnitSystem
+
 import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -68,6 +77,8 @@ import com.meteocompare.app.domain.model.RefreshInterval
 import com.meteocompare.app.domain.model.ThemePreference
 import com.meteocompare.app.domain.model.WeatherModel
 import com.meteocompare.app.ui.components.AppToastEffect
+import com.meteocompare.app.ui.components.AppToastEvent
+import com.meteocompare.app.ui.components.rememberAppToastDispatcher
 import com.meteocompare.app.ui.components.ModernSlidingSelector
 import com.meteocompare.app.ui.components.ModernStateChip
 import com.meteocompare.app.ui.components.OpenMeteoAttribution
@@ -113,6 +124,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val enabled by viewModel.enabledModels.collectAsStateWithLifecycle()
+    val unitSystem by viewModel.unitSystem.collectAsStateWithLifecycle()
     val theme by viewModel.themePreference.collectAsStateWithLifecycle()
     val language by viewModel.languagePreference.collectAsStateWithLifecycle()
     val refreshInterval by viewModel.refreshInterval.collectAsStateWithLifecycle()
@@ -124,6 +136,30 @@ fun SettingsScreen(
     var biasRefreshRequested by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val showToast = rememberAppToastDispatcher()
+    var modelCommitInProgress by remember { mutableStateOf(false) }
+
+    // Les modèles sont édités localement puis persistés en un seul lot.
+    // Cela évite que chaque checkbox réveille les écrans météo encore vivants
+    // dans la back stack et déclenche une nouvelle requête avec une sélection
+    // intermédiaire.
+    val commitModelsAndBack: () -> Unit = {
+        if (!modelCommitInProgress) {
+            modelCommitInProgress = true
+            scope.launch {
+                val result = viewModel.commitModelSelectionResult()
+                if (result == ModelSelectionCommitResult.FAILED) {
+                    modelCommitInProgress = false
+                } else {
+                    // Le dispatcher est porté par AppToastLayer : la confirmation
+                    // reste affichée même après le pop immédiat de Settings.
+                    modelSelectionCommitFeedback(result)?.let(showToast)
+                    onBack()
+                }
+            }
+        }
+    }
+    BackHandler(onBack = commitModelsAndBack)
 
     // Notifications : l'état système est relu à chaque retour sur l'écran
     // (l'utilisateur a pu les autoriser depuis les réglages Android).
@@ -131,18 +167,38 @@ fun SettingsScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notificationsBlocked = !context.canPostNotifications()
     }
+    var pendingNotificationEnableAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { notificationsBlocked = !context.canPostNotifications() }
-    // Android 13+ : la permission n'est demandée qu'au moment où l'utilisateur
-    // active une notification, jamais au lancement de l'application.
+    ) { granted ->
+        notificationsBlocked = !context.canPostNotifications()
+        val pending = pendingNotificationEnableAction
+        pendingNotificationEnableAction = null
+        if (granted) {
+            pending?.invoke()
+        } else {
+            notificationPermissionFeedback(granted = false, hadPendingEnable = pending != null)
+                ?.let(showToast)
+        }
+    }
+    // Android 13+ : une activation n'est persistée qu'après l'accord de la
+    // permission. En cas de refus, le réglage MeteoCompare reste désactivé au
+    // lieu d'afficher un état « activé mais impossible à délivrer ».
     val withNotificationPermission: (Boolean, (Boolean) -> Unit) -> Unit = { enabled, action ->
-        action(enabled)
-        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (!enabled) {
+            pendingNotificationEnableAction = null
+            action(false)
+        } else {
+            val permissionGranted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (shouldRequestNotificationPermission(Build.VERSION.SDK_INT, permissionGranted)) {
+                pendingNotificationEnableAction = { action(true) }
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                action(true)
+            }
         }
     }
 
@@ -152,7 +208,7 @@ fun SettingsScreen(
                 title = { Text(stringResource(R.string.action_settings)) },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = commitModelsAndBack,
                         modifier = Modifier.testTag(TAG_SETTINGS_BACK)
                     ) {
                         Icon(
@@ -167,6 +223,8 @@ fun SettingsScreen(
         SettingsContent(
             enabledModels = enabled,
             onToggle = viewModel::onModelToggled,
+            unitSystem = unitSystem,
+            onUnitSystemSelected = viewModel::onUnitSystemSelected,
             theme = theme,
             onThemeSelected = viewModel::onThemeSelected,
             language = language,
@@ -175,7 +233,9 @@ fun SettingsScreen(
                     // La préférence canonique est écrite avant recreate().
                     // attachBaseContext() relit alors immédiatement la nouvelle
                     // valeur, sans copie concurrente dans AppCompat/DataStore.
-                    if (viewModel.onLanguageSelected(preference)) {
+                    if (viewModel.commitModelSelection() &&
+                        viewModel.onLanguageSelected(preference)
+                    ) {
                         (context as? android.app.Activity)?.recreate()
                     }
                 }
@@ -205,7 +265,11 @@ fun SettingsScreen(
                         withNotificationPermission(it, viewModel::onForecastChangeAlertsToggled)
                     },
                     onCityToggled = viewModel::onNotificationCityToggled,
-                    onOpenSystemSettings = { context.openAppNotificationSettings() }
+                    onOpenSystemSettings = {
+                        if (!context.openAppNotificationSettings()) {
+                            showToast(AppToastEvent.error(R.string.toast_notification_settings_open_error))
+                        }
+                    }
                 )
                 HorizontalDivider()
             }
@@ -234,7 +298,9 @@ internal fun SettingsContent(
     onDonateClick: () -> Unit,
     padding: PaddingValues,
     /** Section Notifications, fournie par l'écran (état, permission, planification). */
-    notificationSection: @Composable () -> Unit = {}
+    notificationSection: @Composable () -> Unit = {},
+    unitSystem: UnitSystem = UnitSystem.METRIC,
+    onUnitSystemSelected: (UnitSystem) -> Unit = {}
 ) {
     // État du tri des modèles — survit à la rotation et au dark-mode toggle.
     // Défaut ZONE parce que 90% des utilisateurs raisonnent d'abord "modèles
@@ -273,6 +339,16 @@ internal fun SettingsContent(
                 )
                 Spacer(Modifier.height(8.dp))
                 LanguageSelector(selected = language, onSelect = onLanguageSelected)
+            }
+        }
+        item { HorizontalDivider() }
+
+        item {
+            Column(modifier = Modifier.padding(16.dp).testTag("settings_units")) {
+                Text(stringResource(R.string.settings_units), style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                UnitSystemSelector(unitSystem, onUnitSystemSelected)
             }
         }
         item { HorizontalDivider() }
@@ -648,7 +724,7 @@ private fun ModelGroupHeader(text: String) {
  * courtes (labelSmall) séparées par bullet, padding vertical 8dp → hauteur
  * ~40dp. Gain : ~35% de hauteur, on voit deux fois plus de modèles à l'écran
  * sur un téléphone standard. Utile maintenant que l'enum WeatherModel a
- * grossi à 19 modèles (débordement inévitable sinon).
+ * grossi à 21 modèles (débordement inévitable sinon).
  *
  * ─── Format des méta ───────────────────────────────────────────────────
  * "1.5 km · 48 h" ou "11 km · 4 j" — résolution + horizon natif. La zone n'est plus dupliquée sur
@@ -662,7 +738,8 @@ private fun CompactModelRow(
     model: WeatherModel,
     enabled: Boolean,
     canDisable: Boolean,
-    onToggle: (Boolean) -> Unit
+    onToggle: (Boolean) -> Unit,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val clickable = canDisable || !enabled
     Row(
@@ -694,7 +771,7 @@ private fun CompactModelRow(
         Text(
             text = stringResource(
                 R.string.model_metadata,
-                formatResolution(model.resolutionKm),
+                formatResolution(model.resolutionKm, units = units),
                 formatForecastHorizon(model.forecastHorizonHours)
             ),
             style = MaterialTheme.typography.labelSmall,
@@ -717,8 +794,8 @@ private fun CompactModelRow(
  * Format compact de la résolution : conserve les décimales réellement utiles
  * (1.5 km, 2.5 km, 5.5 km) mais évite les faux « .0 » (2 km, 7 km, 9 km).
  */
-private fun formatResolution(km: Double): String =
-    if (km % 1.0 == 0.0) "${km.toInt()} km" else "%.1f km".format(km)
+private fun formatResolution(km: Double, units: WeatherUnits): String =
+    units.format(km, WeatherUnit.DISTANCE, if (km % 1.0 == 0.0 && !units.imperial) 0 else 1)
 
 /** Horizon natif affiché sans le confondre avec le `forecast_days` entier de l'API. */
 @Composable
@@ -762,6 +839,29 @@ private fun ModelSortSelector(
         modifier = Modifier.fillMaxWidth(),
         itemModifier = { mode -> Modifier.testTag("$TAG_SETTINGS_SORT${mode.name}") }
     )
+}
+
+@Composable
+internal fun UnitSystemSelector(selected: UnitSystem, onSelect: (UnitSystem) -> Unit) {
+    Column(Modifier.selectableGroup()) {
+        UnitSystem.entries.forEach { system ->
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .selectable(selected = system == selected,
+                        role = androidx.compose.ui.semantics.Role.RadioButton,
+                        onClick = { onSelect(system) })
+                    .testTag("settings_units_${system.name}").padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.RadioButton(selected = system == selected, onClick = null)
+                Spacer(Modifier.width(8.dp))
+                val example = WeatherUnits(system)
+                Text(stringResource(if (system == UnitSystem.METRIC)
+                    R.string.settings_units_metric else R.string.settings_units_imperial,
+                    example.temperatureUnit, example.windUnit, example.precipitationUnit))
+            }
+        }
+    }
 }
 
 @Composable
@@ -920,6 +1020,28 @@ internal const val TAG_SETTINGS_LANGUAGE = "settings_language_"
 internal const val TAG_SETTINGS_REFRESH = "settings_refresh_"
 internal const val TAG_SETTINGS_ENGINE = "settings_engine_"
 
+internal fun shouldRequestNotificationPermission(sdkInt: Int, permissionGranted: Boolean): Boolean =
+    sdkInt >= Build.VERSION_CODES.TIRAMISU && !permissionGranted
+
+internal fun modelSelectionCommitFeedback(
+    result: ModelSelectionCommitResult
+): AppToastEvent? = when (result) {
+    ModelSelectionCommitResult.SAVED -> AppToastEvent.success(R.string.toast_models_updated)
+    ModelSelectionCommitResult.SAVED_WIDGET_REFRESH_DELAYED ->
+        AppToastEvent.warning(R.string.toast_widget_refresh_delayed)
+    ModelSelectionCommitResult.UNCHANGED,
+    ModelSelectionCommitResult.FAILED -> null
+}
+
+internal fun notificationPermissionFeedback(
+    granted: Boolean,
+    hadPendingEnable: Boolean
+): AppToastEvent? = if (!granted && hadPendingEnable) {
+    AppToastEvent.warning(R.string.toast_notifications_permission_denied)
+} else {
+    null
+}
+
 /** Vrai si les notifications sont autorisées (permission Android 13+ et réglage système). */
 private fun Context.canPostNotifications(): Boolean {
     val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -929,12 +1051,10 @@ private fun Context.canPostNotifications(): Boolean {
 }
 
 /** Ouvre la page système des notifications de l'application (Android 8+). */
-private fun Context.openAppNotificationSettings() {
-    runCatching {
-        startActivity(
-            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    }
-}
+private fun Context.openAppNotificationSettings(): Boolean = runCatching {
+    startActivity(
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}.isSuccess

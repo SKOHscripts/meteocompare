@@ -1,15 +1,15 @@
 package com.meteocompare.app.ui.citylist
 
+import com.meteocompare.app.core.units.WeatherUnit
+import com.meteocompare.app.core.units.WeatherUnits
+import com.meteocompare.app.core.units.LocalWeatherUnits
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.keyframes
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ShowChart
@@ -43,6 +42,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Air
@@ -73,6 +73,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,7 +94,7 @@ import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringResource
+import com.meteocompare.app.core.units.weatherStringResource as stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -141,6 +142,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
 // ============================================================================
@@ -153,6 +155,7 @@ fun CityListScreen(
     onCityClick: (cityId: String) -> Unit,
     onSettingsClick: () -> Unit,
     onGraphicViewClick: (cityId: String) -> Unit = {},
+    onRadarClick: (cityId: String) -> Unit = {},
     onHelpClick: () -> Unit,
     selectedCityId: String? = null,
     selectionEnabled: Boolean = false,
@@ -190,6 +193,7 @@ fun CityListScreen(
             uiState = uiState,
             onCityClick = onCityClick,
             onGraphicViewClick = onGraphicViewClick,
+            onRadarClick = onRadarClick,
             onAddClick = { showAddSheet = true },
             onDonateClick = { showDonationDialog = true },
             onHelpClick = onHelpClick,
@@ -225,27 +229,25 @@ fun CityListScreen(
 
 @Composable
 private fun DonationHeartButton(onClick: () -> Unit) {
-    val transition = rememberInfiniteTransition(label = "donation-heart")
-    val pulse by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = keyframes {
-                durationMillis = 6_000
-                0f at 0
-                0f at 4_000
-                1f at 4_200
-                0f at 4_450
-                0.7f at 4_600
-                0f at 4_850
-                0f at 6_000
-            },
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "donation-heart-pulse"
-    )
+    // L'ancienne infiniteTransition demandait des frames pendant les 6 secondes
+    // complètes du cycle, y compris les ~5 secondes où la valeur restait à 0.
+    // Un Animatable piloté par delay ne réveille Compose que pendant les courtes
+    // impulsions réellement visibles, ce qui réduit le travail GPU/CPU sur la Home.
+    val pulse = remember { Animatable(0f) }
+    LaunchedEffect(pulse) {
+        while (true) {
+            delay(4_000)
+            pulse.animateTo(1f, animationSpec = tween(200))
+            pulse.animateTo(0f, animationSpec = tween(250))
+            pulse.animateTo(0.7f, animationSpec = tween(150))
+            pulse.animateTo(0f, animationSpec = tween(250))
+            delay(1_150)
+        }
+    }
+
+    val pulseValue = pulse.value
     val baseColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val heartColor = lerp(baseColor, Color(0xFFE53935), pulse)
+    val heartColor = lerp(baseColor, Color(0xFFE53935), pulseValue)
 
     IconButton(
         onClick = onClick,
@@ -255,7 +257,7 @@ private fun DonationHeartButton(onClick: () -> Unit) {
             imageVector = Icons.Outlined.FavoriteBorder,
             contentDescription = stringResource(R.string.action_support_dev),
             tint = heartColor,
-            modifier = Modifier.scale(1f + (0.08f * pulse))
+            modifier = Modifier.scale(1f + (0.08f * pulseValue))
         )
     }
 }
@@ -270,6 +272,7 @@ internal fun CityListContent(
     uiState: CityListUiState,
     onCityClick: (cityId: String) -> Unit,
     onGraphicViewClick: (cityId: String) -> Unit = {},
+    onRadarClick: (cityId: String) -> Unit = {},
     onAddClick: () -> Unit,
     onDonateClick: () -> Unit,
     onHelpClick: () -> Unit = {},
@@ -361,6 +364,7 @@ internal fun CityListContent(
                         isOnline = uiState.isOnline,
                         onCityClick = onCityClick,
                         onGraphicViewClick = onGraphicViewClick,
+                        onRadarClick = onRadarClick,
                         onRemove = onRemoveCity,
                         onRetry = onRetry,
                         onMarineAction = onMarineAction,
@@ -379,6 +383,7 @@ internal fun CityList(
     isOnline: Boolean = true,
     onCityClick: (String) -> Unit,
     onGraphicViewClick: (String) -> Unit = {},
+    onRadarClick: (String) -> Unit = {},
     onRemove: (String) -> Unit,
     onRetry: (City) -> Unit,
     onMarineAction: (City) -> Unit = {},
@@ -408,6 +413,7 @@ internal fun CityList(
                 state = state,
                 onClick = { onCityClick(state.city.id) },
                 onGraphicViewClick = { onGraphicViewClick(state.city.id) },
+                onRadarClick = { onRadarClick(state.city.id) },
                 onRemove = { onRemove(state.city.id) },
                 onRetry = { onRetry(state.city) },
                 onMarineAction = { onMarineAction(state.city) },
@@ -478,16 +484,18 @@ internal fun CityCard(
     state: CityCardState,
     onClick: () -> Unit,
     onGraphicViewClick: () -> Unit = {},
+    onRadarClick: () -> Unit = {},
     onRemove: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     onMarineAction: () -> Unit = {},
     isSelected: Boolean = false,
-    selectionEnabled: Boolean = false
+    selectionEnabled: Boolean = false,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val resources = LocalResources.current
     val a11yDescription = A11yFormatter
-        .cityCardDescription(resources, state)
+        .cityCardDescription(resources, state, units = units)
     val loaded = state.forecast as? ForecastState.Loaded
     WeatherAccentTheme(condition = loaded?.currentCondition) {
         val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -595,10 +603,10 @@ internal fun CityCard(
                         sunrise = loaded?.sunrise,
                         sunset = loaded?.sunset,
                         marineEnabled = state.city.marineEnabled,
-                        marineAvailable = state.isMarineAvailable,
                         marineLoading = state.isMarineLoading,
                         onMarineAction = onMarineAction,
                         onGraphicViewClick = onGraphicViewClick,
+                        onRadarClick = onRadarClick,
                         onRemove = onRemove
                     )
 
@@ -653,10 +661,10 @@ private fun CityCardHeader(
     sunrise: LocalTime?,
     sunset: LocalTime?,
     marineEnabled: Boolean,
-    marineAvailable: Boolean,
     marineLoading: Boolean,
     onMarineAction: () -> Unit,
     onGraphicViewClick: () -> Unit,
+    onRadarClick: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -710,10 +718,10 @@ private fun CityCardHeader(
         CityCardMenu(
             cityId = city.id,
             marineEnabled = marineEnabled,
-            marineAvailable = marineAvailable,
             marineLoading = marineLoading,
             onMarineAction = onMarineAction,
             onGraphicViewClick = onGraphicViewClick,
+            onRadarClick = onRadarClick,
             onRemove = onRemove
         )
     }
@@ -856,7 +864,8 @@ private fun CurrentWeatherHero(
     currentCloudCover: Int?,
     agreementPercent: Int?,
     accentColor: Color,
-    hourlyTemps: List<Double?>
+    hourlyTemps: List<Double?>,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val trend = homeTemperatureTrend(currentTemp, hourlyTemps)
 
@@ -900,7 +909,7 @@ private fun CurrentWeatherHero(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = currentTemp?.let { "${it.roundToInt()}°" } ?: "—",
+                        text = currentTemp?.let { units.temp(it) } ?: "—",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -942,7 +951,9 @@ internal enum class HomeTemperatureTrendDirection { RISING, FALLING, STABLE }
 
 internal data class HomeTemperatureTrend(
     val direction: HomeTemperatureTrendDirection,
-    val targetTemperature: Int
+    val targetTemperature: Int,
+    /** Keep the source precision until the selected display unit is applied. */
+    val targetTemperatureC: Double = targetTemperature.toDouble()
 )
 
 /** Tendance légère basée sur une échéance proche (~H+3), sans nouveau calcul météo. */
@@ -960,25 +971,25 @@ internal fun homeTemperatureTrend(
         delta <= -HOME_TEMPERATURE_TREND_THRESHOLD_C -> HomeTemperatureTrendDirection.FALLING
         else -> HomeTemperatureTrendDirection.STABLE
     }
-    return HomeTemperatureTrend(direction, target.roundToInt())
+    return HomeTemperatureTrend(direction, target.roundToInt(), target)
 }
 
 @Composable
-private fun HomeTemperatureTrendChip(trend: HomeTemperatureTrend) {
+private fun HomeTemperatureTrendChip(trend: HomeTemperatureTrend, units: WeatherUnits = LocalWeatherUnits.current) {
     val (symbol, a11y, color) = when (trend.direction) {
         HomeTemperatureTrendDirection.RISING -> Triple(
             "↑",
-            stringResource(R.string.home_temperature_trend_rising, trend.targetTemperature),
+            stringResource(R.string.home_temperature_trend_rising, trend.targetTemperatureC),
             temperatureMetricAccent()
         )
         HomeTemperatureTrendDirection.FALLING -> Triple(
             "↓",
-            stringResource(R.string.home_temperature_trend_falling, trend.targetTemperature),
+            stringResource(R.string.home_temperature_trend_falling, trend.targetTemperatureC),
             if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) Color(0xFF90CAF9) else Color(0xFF1565C0)
         )
         HomeTemperatureTrendDirection.STABLE -> Triple(
             "→",
-            stringResource(R.string.home_temperature_trend_stable, trend.targetTemperature),
+            stringResource(R.string.home_temperature_trend_stable, trend.targetTemperatureC),
             MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -991,7 +1002,7 @@ private fun HomeTemperatureTrendChip(trend: HomeTemperatureTrend) {
         color = color.copy(alpha = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) 0.16f else 0.10f)
     ) {
         Text(
-            text = "$symbol ${trend.targetTemperature}°",
+            text = "$symbol ${units.temp(trend.targetTemperatureC)}",
             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
@@ -1028,8 +1039,8 @@ private fun HomeAgreementBadge(percent: Int) {
 }
 
 @Composable
-private fun TodayMetricGrid(today: DayConfidence) {
-    val temperature = temperatureMetricPresentation(today.tempMax)
+private fun TodayMetricGrid(today: DayConfidence, units: WeatherUnits = LocalWeatherUnits.current) {
+    val temperature = temperatureMetricPresentation(today.tempMax, units = units)
     val precipitation = precipitationMetricPresentation(today.precipitation)
     val primaryWind = today.windMax ?: today.windGustMax
     val gustOnly = today.windMax == null && today.windGustMax != null
@@ -1114,38 +1125,39 @@ private data class MetricPresentation(
     val supporting: String? = null
 )
 
-private fun temperatureMetricPresentation(score: ConfidenceScore?): MetricPresentation {
+private fun temperatureMetricPresentation(score: ConfidenceScore?, units: WeatherUnits): MetricPresentation {
     if (score == null) return MetricPresentation(value = "—")
     val value = if (score.spread <= 1.0) {
-        score.meanValue.roundToInt().toString()
+        units.value(score.meanValue, WeatherUnit.TEMPERATURE_COMPACT)
     } else {
-        "${score.minValue.roundToInt()}–${score.maxValue.roundToInt()}"
+        "${units.value(score.minValue, WeatherUnit.TEMPERATURE_COMPACT)}–${units.value(score.maxValue, WeatherUnit.TEMPERATURE_COMPACT)}"
     }
-    return MetricPresentation(value = value, unit = "°")
+    return MetricPresentation(value = value, unit = units.temperatureSuffix)
 }
 
-private fun windValue(score: ConfidenceScore?): String {
+private fun windValue(score: ConfidenceScore?, units: WeatherUnits): String {
     if (score == null) return "—"
     return if (score.spread <= 2.0) {
-        score.meanValue.roundToInt().toString()
+        units.value(score.meanValue, WeatherUnit.WIND_SPEED)
     } else {
-        "${score.minValue.roundToInt()}–${score.maxValue.roundToInt()}"
+        "${units.value(score.minValue, WeatherUnit.WIND_SPEED)}–${units.value(score.maxValue, WeatherUnit.WIND_SPEED)}"
     }
 }
 
 @Composable
 private fun windMetricPresentation(
     score: ConfidenceScore?,
-    gust: ConfidenceScore?
+    gust: ConfidenceScore?,
+    units: WeatherUnits = LocalWeatherUnits.current
 ): MetricPresentation {
     if (score == null) return MetricPresentation(value = "—")
     return MetricPresentation(
-        value = windValue(score),
-        unit = "km/h",
+        value = windValue(score, units = units),
+        unit = units.windUnit,
         supporting = gust?.let {
             stringResource(
                 R.string.metric_gust_supporting,
-                it.maxValue.roundToInt().toString()
+                units.value(it.maxValue, WeatherUnit.WIND_SPEED)
             )
         }
     )
@@ -1153,28 +1165,29 @@ private fun windMetricPresentation(
 
 @Composable
 private fun precipitationMetricPresentation(
-    precip: PrecipitationConfidence?
+    precip: PrecipitationConfidence?,
+    units: WeatherUnits = LocalWeatherUnits.current
 ): MetricPresentation = when (precip) {
     null -> MetricPresentation(value = "—")
     is PrecipitationConfidence.NoRain ->
         MetricPresentation(value = stringResource(R.string.precip_dry))
     is PrecipitationConfidence.Rain -> {
-        val value = if (precip.minMm.roundToInt() == precip.maxMm.roundToInt()) {
-            (precip.meta.centralAmountMm ?: precip.meanMm).roundToInt().toString()
+        val value = if (units.sameDisplayedValue(precip.minMm, precip.maxMm, WeatherUnit.PRECIPITATION, 1)) {
+            units.value((precip.meta.centralAmountMm ?: precip.meanMm), WeatherUnit.PRECIPITATION, if (units.imperial) 2 else 0)
         } else {
-            "${precip.minMm.roundToInt()}–${precip.maxMm.roundToInt()}"
+            "${units.value(precip.minMm, WeatherUnit.PRECIPITATION, if (units.imperial) 2 else 0)}–${units.value(precip.maxMm, WeatherUnit.PRECIPITATION, if (units.imperial) 2 else 0)}"
         }
-        MetricPresentation(value = value, unit = "mm")
+        MetricPresentation(value = value, unit = units.precipitationUnit)
     }
     is PrecipitationConfidence.Divided -> {
-        val value = if (precip.rainMinMm.roundToInt() == precip.rainMaxMm.roundToInt()) {
-            (precip.meta.centralAmountMm ?: precip.rainMeanMm).roundToInt().toString()
+        val value = if (units.sameDisplayedValue(precip.rainMinMm, precip.rainMaxMm, WeatherUnit.PRECIPITATION, 1)) {
+            units.value((precip.meta.centralAmountMm ?: precip.rainMeanMm), WeatherUnit.PRECIPITATION, if (units.imperial) 2 else 0)
         } else {
-            "${precip.rainMinMm.roundToInt()}–${precip.rainMaxMm.roundToInt()}"
+            "${units.value(precip.rainMinMm, WeatherUnit.PRECIPITATION, if (units.imperial) 2 else 0)}–${units.value(precip.rainMaxMm, WeatherUnit.PRECIPITATION, if (units.imperial) 2 else 0)}"
         }
         MetricPresentation(
             value = value,
-            unit = "mm",
+            unit = units.precipitationUnit,
             supporting = stringResource(
                 R.string.metric_precip_models_short,
                 precip.modelsForRain,
@@ -1423,7 +1436,7 @@ private fun scenarioRepresentativeCondition(kind: WeatherScenarioKind): WeatherC
 }
 
 @Composable
-private fun weatherScenarioMetrics(scenario: WeatherScenario): List<String> {
+private fun weatherScenarioMetrics(scenario: WeatherScenario, units: WeatherUnits = LocalWeatherUnits.current): List<String> {
     val platformLocale = LocalLocale.current.platformLocale
     val precipitationFormatter = remember(platformLocale) {
         NumberFormat.getNumberInstance(platformLocale).apply {
@@ -1434,10 +1447,10 @@ private fun weatherScenarioMetrics(scenario: WeatherScenario): List<String> {
     val gustMin = scenario.gustMinKmh
     val gustMax = scenario.gustMaxKmh
     val gustMetric = if (gustMin != null && gustMax != null) {
-        val value = if (gustMin.roundToInt() == gustMax.roundToInt()) {
-            "${gustMax.roundToInt()} km/h"
+        val value = if (units.sameDisplayedValue(gustMin, gustMax, WeatherUnit.WIND_SPEED)) {
+            units.speed(gustMax)
         } else {
-            "${gustMin.roundToInt()}–${gustMax.roundToInt()} km/h"
+            "${units.value(gustMin, WeatherUnit.WIND_SPEED)}–${units.speed(gustMax)}"
         }
         "💨 " + stringResource(R.string.home_scenario_gust_short, value)
     } else {
@@ -1448,22 +1461,22 @@ private fun weatherScenarioMetrics(scenario: WeatherScenario): List<String> {
         val tempMin = scenario.temperatureMinC
         val tempMax = scenario.temperatureMaxC
         if (tempMin != null && tempMax != null) {
-            add(if (tempMin.roundToInt() == tempMax.roundToInt()) {
-                "🌡 ${tempMin.roundToInt()}°"
+            add(if (units.sameDisplayedValue(tempMin, tempMax, WeatherUnit.TEMPERATURE_COMPACT)) {
+                "🌡 ${units.temp(tempMin)}"
             } else {
-                "🌡 ${tempMin.roundToInt()}–${tempMax.roundToInt()}°"
+                "🌡 ${units.value(tempMin, WeatherUnit.TEMPERATURE_COMPACT)}–${units.temp(tempMax)}"
             })
         }
 
         val rainMin = scenario.precipitationMinMm
         val rainMax = scenario.precipitationMaxMm
         if (rainMax != null && rainMax >= 0.05) {
-            val minText = precipitationFormatter.format(rainMin ?: 0.0)
-            val maxText = precipitationFormatter.format(rainMax)
+            val minText = units.value(rainMin ?: 0.0, WeatherUnit.PRECIPITATION, 1, platformLocale)
+            val maxText = units.value(rainMax, WeatherUnit.PRECIPITATION, 1, platformLocale)
             add(if ((rainMin ?: 0.0).let { abs(it - rainMax) } < 0.05) {
-                "🌧 $maxText mm"
+                "🌧 $maxText ${units.precipitationUnit}"
             } else {
-                "🌧 $minText–$maxText mm"
+                "🌧 $minText–$maxText ${units.precipitationUnit}"
             })
         }
 
@@ -1481,27 +1494,16 @@ private fun weatherScenarioMetrics(scenario: WeatherScenario): List<String> {
 private fun CityCardMenu(
     cityId: String,
     marineEnabled: Boolean,
-    marineAvailable: Boolean,
     marineLoading: Boolean,
     onMarineAction: () -> Unit,
     onGraphicViewClick: () -> Unit,
+    onRadarClick: () -> Unit,
     onRemove: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }) {
             Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.action_more_options))
-        }
-        if (marineAvailable) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 8.dp, end = 8.dp)
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF1976D2))
-                    .testTag("$TAG_CITY_MARINE_AVAILABLE$cityId")
-            )
         }
         DropdownMenu(
             expanded = expanded,
@@ -1515,7 +1517,8 @@ private fun CityCardMenu(
                 .padding(horizontal = 6.dp, vertical = 2.dp)
                 .clip(RoundedCornerShape(14.dp))
             DropdownMenuItem(
-                modifier = menuItemModifier,
+                modifier = menuItemModifier
+                    .testTag("$TAG_CITY_MARINE_MENU$cityId"),
                 text = {
                     Text(
                         stringResource(
@@ -1549,6 +1552,21 @@ private fun CityCardMenu(
                 onClick = {
                     expanded = false
                     onGraphicViewClick()
+                }
+            )
+            DropdownMenuItem(
+                modifier = menuItemModifier
+                    .testTag("$TAG_CITY_RADAR_MENU$cityId"),
+                text = { Text(stringResource(R.string.radar_open)) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Radar,
+                        contentDescription = null
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onRadarClick()
                 }
             )
             DropdownMenuItem(
@@ -1623,9 +1641,10 @@ internal fun EmptyState(
 // ─── Test tags exposés pour les tests d'instrumentation ─────────────────────
 internal const val TAG_CITY_LIST = "city_list"
 internal const val TAG_CITY_CARD = "city_card_"
-internal const val TAG_CITY_MARINE_AVAILABLE = "city_marine_available_"
 internal const val TAG_CITY_MARINE_ENABLED = "city_marine_enabled_"
 internal const val TAG_CITY_GRAPHIC_VIEW_MENU = "city_graphic_view_menu_"
+internal const val TAG_CITY_RADAR_MENU = "city_radar_menu_"
+internal const val TAG_CITY_MARINE_MENU = "city_marine_menu_"
 internal const val TAG_CITY_MARINE_MENU_ICON = "city_marine_menu_icon_"
 internal const val TAG_CITY_REMOVE_MENU_ICON = "city_remove_menu_icon_"
 internal const val TAG_EMPTY_STATE = "empty_state"

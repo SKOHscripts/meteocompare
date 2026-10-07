@@ -38,7 +38,7 @@
     <string name="refresh_interval_6_hours">6 h</string>
     <string name="refresh_interval_manual">Manuale</string>
     <string name="settings_models_title">Modelli meteorologici</string>
-    <string name="settings_models_desc">Scegli i modelli da confrontare. Più modelli arricchiscono il confronto, ma richiedono più dati.</string>
+    <string name="settings_models_desc">Scegli i modelli da confrontare. Più modelli arricchiscono il confronto, ma richiedono più dati. Le modifiche vengono applicate insieme quando esci dalle Impostazioni.</string>
     <string name="settings_models_min_warning">Deve rimanere attivo almeno un modello.</string>
     <string name="settings_about_title">Informazioni</string>
     <string name="settings_about_version">Versione %s</string>
@@ -48,7 +48,7 @@
     <string name="open_meteo_link_label">Licenza Open-Meteo</string>
     <string name="widget_open_meteo_attribution">Open-Meteo · CC BY 4.0</string>
     <string name="widget_open_meteo_attribution_short">Open-Meteo</string>
-    <string name="settings_about_models_credit">Modelli: AROME e ARPEGE di Météo-France, ICON di DWD, GFS e HRRR di NOAA, ECMWF e AIFS del Centro Europeo, UKMO del UK Met Office, GEM di Environment Canada, MET Nordic di MET Norway, HARMONIE di KNMI e DMI, ICON-CH di MeteoSwiss, ACCESS del Bureau of Meteorology (Australia), GRAPES di CMA (Cina), WeatherNext 2 di Google DeepMind.</string>
+    <string name="settings_about_models_credit">Modelli: AROME e ARPEGE di Météo-France, ICON di DWD, GFS, HRRR e AIGFS di NOAA, ECMWF e AIFS del Centro Europeo, UKMO del UK Met Office, GEM di Environment Canada, GSM di JMA, MET Nordic di MET Norway, HARMONIE di KNMI e DMI, ICON-CH di MeteoSwiss, ACCESS del Bureau of Meteorology (Australia), GRAPES di CMA (Cina), WeatherNext 2 di Google DeepMind.</string>
     <string name="settings_bias_refresh_title">Monitoraggio del bias</string>
     <string name="settings_bias_refresh_desc">Recupera fino a 3 settimane di storico D+1 per avviare l’affidabilità locale. I modelli senza archivio si calibrano gradualmente.</string>
     <string name="settings_bias_refresh_action">Inizializza o aggiorna</string>
@@ -137,15 +137,15 @@ dato</string>
     <string name="wind_legend_strong">forte</string>
     <string name="wind_legend_storm">tempesta</string>
 
-    <string name="temp_legend_above_normal">&gt; riferimento su 10 anni + 2°</string>
-    <string name="temp_legend_below_normal">&lt; riferimento su 10 anni − 2°</string>
+    <string name="temp_legend_above_normal">&gt; riferimento su 10 anni + %1$s</string>
+    <string name="temp_legend_below_normal">&lt; riferimento su 10 anni − %1$s</string>
 
     <string name="var_temp_max">Temperatura massima</string>
     <string name="var_temp_min">Temperatura minima</string>
     <string name="today_summary_temp_min_short">Min</string>
     <string name="today_summary_temp_max_short">Max</string>
-    <string name="var_wind_max">Vento massimo a 10 m</string>
-    <string name="var_wind_gust_max">Raffiche massime a 10 m</string>
+    <string name="var_wind_max">Vento massimo a %1$s</string>
+    <string name="var_wind_gust_max">Raffiche massime a %1$s</string>
     <string name="var_precipitation">Precipitazioni</string>
 
     <string name="refresh_success">Previsione aggiornata</string>
@@ -155,6 +155,7 @@ dato</string>
     <string name="toast_city_add_error">Impossibile aggiungere %1$s ai preferiti</string>
     <string name="toast_city_removed">%1$s rimossa dai preferiti</string>
     <string name="toast_city_removed_generic">Città rimossa dai preferiti</string>
+    <string name="toast_city_removed_notification_warning">Città rimossa, ma non è stato possibile aggiornare le relative impostazioni di notifica.</string>
     <string name="toast_city_remove_error">Impossibile rimuovere questa città</string>
     <string name="toast_city_refresh_success">Previsione per %1$s aggiornata</string>
     <string name="toast_refresh_all_success">Tutte le previsioni sono aggiornate</string>
@@ -165,6 +166,21 @@ dato</string>
     <string name="toast_theme_updated">Tema aggiornato</string>
     <string name="toast_refresh_interval_updated">Intervallo di aggiornamento aggiornato</string>
     <string name="toast_forecast_engine_updated">Motore di previsione aggiornato</string>
+    <string name="toast_models_updated">Selezione dei modelli meteo salvata</string>
+    <string name="toast_notifications_daily_enabled">Riepilogo meteo giornaliero attivato</string>
+    <string name="toast_notifications_daily_disabled">Riepilogo meteo giornaliero disattivato</string>
+    <string name="toast_notifications_time_updated">Ora del riepilogo giornaliero aggiornata</string>
+    <string name="toast_notifications_divergence_enabled">Avvisi di divergenza dei modelli attivati</string>
+    <string name="toast_notifications_divergence_disabled">Avvisi di divergenza dei modelli disattivati</string>
+    <string name="toast_notifications_change_enabled">Avvisi di variazione delle previsioni attivati</string>
+    <string name="toast_notifications_change_disabled">Avvisi di variazione delle previsioni disattivati</string>
+    <string name="toast_notifications_city_enabled">%1$s aggiunta alle città seguite per le notifiche</string>
+    <string name="toast_notifications_city_disabled">%1$s rimossa dalle città seguite per le notifiche</string>
+    <string name="toast_notifications_cities_updated">Città seguite per le notifiche aggiornate</string>
+    <string name="toast_notifications_schedule_warning">Impostazione salvata, ma non è stato possibile aggiornare la pianificazione delle notifiche. Verrà ritentata automaticamente.</string>
+    <string name="toast_notifications_permission_denied">Notifiche non attivate: autorizzazione negata</string>
+    <string name="toast_notification_settings_open_error">Impossibile aprire le impostazioni di notifica del sistema</string>
+    <string name="toast_widget_refresh_delayed">Impostazione salvata. Il widget si aggiornerà al prossimo aggiornamento.</string>
     <string name="toast_settings_save_error">Impossibile salvare questa impostazione</string>
     <string name="toast_action_error">Impossibile completare l’azione</string>
     <string name="toast_open_link_error">Impossibile aprire questo link</string>
@@ -174,6 +190,8 @@ dato</string>
     <string name="error_server">Errore del server (HTTP %d)</string>
     <string name="error_unknown">Errore sconosciuto</string>
     <string name="error_model_out_of_range">Dati non disponibili per questo modello</string>
+    <string name="error_location_not_supported_by_model">Non supportata dal modello selezionato</string>
+    <string name="error_location_not_supported_by_models">Non supportata dai modelli selezionati</string>
     <string name="error_no_model_available">Nessun dato di modello disponibile per questa città</string>
     <string name="city_not_found_in_favorites">Città non trovata nei preferiti</string>
 
@@ -193,7 +211,6 @@ dato</string>
     <string name="metric_gust_supporting">Raffica %1$s</string>
     <string name="metric_precip_models_short">%1$d/%2$d modelli</string>
     <string name="metric_precip_models_rain">%1$d di %2$d modelli</string>
-    <string name="metric_gust_detail">Raffiche %1$s km/h</string>
     <string name="metric_detail_wind">Vento</string>
     <string name="metric_detail_gusts">Raffiche</string>
     <string name="metric_confidence_high">Convergenza alta · %1$d%%</string>
@@ -202,7 +219,7 @@ dato</string>
     <string name="metric_summary_average">Consenso centrale</string>
     <string name="metric_summary_range">Intervallo %1$s</string>
     <string name="metric_summary_range_and_spread">Intervallo %1$s · dispersione %2$s</string>
-    <string name="metric_summary_max_model_precip">Modello più alto %1$.1f mm</string>
+    <string name="metric_summary_max_model_precip">Modello più alto %1$s %2$s</string>
 
     <string name="search_city_placeholder">Cerca una città…</string>
     <string name="search_no_results">Nessuna città trovata</string>
@@ -212,6 +229,7 @@ dato</string>
     <string name="donations_dialog_body">MeteoCompare è gratuita, senza analisi, tracciamento pubblicitario o annunci. Se vuoi sostenere lo sviluppo:</string>
     <string name="donations_dialog_disclaimer">Ai donatori non viene concesso alcun privilegio. Il codice sorgente e l’app restano identici per tutti.</string>
     <string name="donations_liberapay_desc">Contributi periodici, adatti al software libero</string>
+    <string name="donations_github_sponsors_desc">Supporto ricorrente tramite GitHub Sponsors</string>
     <string name="donations_kofi_desc">Donazione una tantum, «offrimi un caffè»</string>
     <string name="donations_dialog_close">Chiudi</string>
 
@@ -219,21 +237,21 @@ dato</string>
     <string name="a11y_confidence_medium">Convergenza media</string>
     <string name="a11y_confidence_low">Convergenza bassa</string>
     <string name="a11y_open_confidence_explanation">%d%% di convergenza tra modelli, apri la spiegazione dettagliata</string>
-    <string name="a11y_temp_single">%d gradi</string>
-    <string name="a11y_temp_range">tra %1$d e %2$d gradi</string>
+    <string name="a11y_temp_single">%1$s %2$s</string>
+    <string name="a11y_temp_range">tra %1$s e %2$s %3$s</string>
     <string name="a11y_temp_with_confidence">%1$s, %2$s, %3$d percento</string>
     <string name="a11y_no_rain">Nessuna pioggia prevista, convergenza del %d percento</string>
     <string name="a11y_no_rain_no_convergence">Nessuna pioggia prevista</string>
-    <string name="a11y_rain_no_convergence">Pioggia prevista, tra %1$d e %2$d millimetri</string>
-    <string name="a11y_rain">Pioggia prevista, tra %1$d e %2$d millimetri, convergenza del %3$d percento</string>
-    <string name="a11y_models_divided">Modelli divisi sulla pioggia: %1$d su %2$d prevedono pioggia, tra %3$d e %4$d millimetri</string>
+    <string name="a11y_rain_no_convergence">Pioggia prevista, tra %1$s e %2$s %3$s</string>
+    <string name="a11y_rain">Pioggia prevista, tra %1$s e %2$s %4$s, convergenza del %3$d percento</string>
+    <string name="a11y_models_divided">Modelli divisi sulla pioggia: %1$d su %2$d prevedono pioggia, tra %3$s e %4$s %5$s</string>
     <string name="a11y_city_loading">Caricamento delle previsioni.</string>
     <string name="a11y_city_error">Errore: %1$s.</string>
-    <string name="a11y_now_temp">Ora %d gradi</string>
+    <string name="a11y_now_temp">Ora %1$s %2$s</string>
     <string name="a11y_temperature_prefix">Temperatura</string>
     <string name="a11y_overall_confidence">Convergenza complessiva del %d percento</string>
     <string name="a11y_hourly_empty">Grafico vuoto, dati insufficienti</string>
-    <string name="a11y_hourly_template">Banda di convergenza oraria su %1$d giorni. Temperatura centrale di %2$d gradi ora e %3$d gradi alla fine dell’orizzonte. Divergenza tra modelli %4$s. Convergenza del %5$d percento ora e del %6$d percento a D più %1$d.</string>
+    <string name="a11y_hourly_template">Banda di convergenza oraria su %1$d giorni. Temperatura centrale di %2$s %7$s ora e %3$s %7$s alla fine dell’orizzonte. Divergenza tra modelli %4$s. Convergenza del %5$d percento ora e del %6$d percento a D più %1$d.</string>
     <string name="a11y_divergence_strong">in forte aumento</string>
     <string name="a11y_divergence_increasing">in aumento</string>
     <string name="a11y_divergence_stable">complessivamente stabile</string>
@@ -241,7 +259,7 @@ dato</string>
     <string name="a11y_today_summary_many">Riepilogo di oggi, %d modelli analizzati</string>
     <string name="a11y_temp_max_label">Temperatura massima</string>
     <string name="a11y_temp_min_label">Temperatura minima</string>
-    <string name="a11y_wind_max_label">Vento massimo a 10 m</string>
+    <string name="a11y_wind_max_label">Vento massimo a %1$s</string>
     <string name="a11y_kmh_unit">chilometri orari</string>
 
     <string name="confidence_explanation_title">Perché questa convergenza?</string>
@@ -251,12 +269,12 @@ dato</string>
     <string name="confidence_verdict_medium">La convergenza dei modelli è parziale. I valori esatti restano incerti.</string>
     <string name="confidence_verdict_low">I modelli divergono nettamente. Interpreta i valori esatti con cautela.</string>
 
-    <string name="confidence_summary_converged">Tutti i modelli si concentrano intorno a %1$d%2$s</string>
+    <string name="confidence_summary_converged">Tutti i modelli si concentrano intorno a %1$s%2$s</string>
 
-    <string name="confidence_summary_spread">Tra %1$d e %2$d%3$s (dispersione %4$d%3$s)</string>
+    <string name="confidence_summary_spread">Tra %1$s e %2$s%3$s (dispersione %4$s%3$s)</string>
     <string name="confidence_precip_all_dry">Tutti i modelli prevedono tempo asciutto</string>
 
-    <string name="confidence_precip_all_rain">Tutti prevedono pioggia: tra %1$d e %2$d mm</string>
+    <string name="confidence_precip_all_rain">Tutti prevedono pioggia: tra %1$s e %2$s %3$s</string>
 
     <string name="confidence_precip_divided">%1$d/%2$d modelli prevedono pioggia</string>
 
@@ -320,6 +338,7 @@ dato</string>
     <string name="bias_history_best_progress">Modello più avanzato: %1$d/%2$d giorni confrontati.</string>
     <string name="bias_history_fetch_action">Recupera la cronologia ora</string>
     <string name="bias_history_fetch_requested">Recupero in background…</string>
+    <string name="bias_history_fetch_queued">Recupero in attesa…</string>
 
     <string name="bias_chip_calibrating_content_description">Monitoraggio del bias in corso per questo modello: i dati storici non sono ancora sufficienti per valutarne l’accuratezza.</string>
 
@@ -389,13 +408,13 @@ dato</string>
     <string name="bias_reliability_balance_over_badge">%1$d%% sopra</string>
     <string name="bias_reliability_direction_balance">%1$d%% sopra · %2$d%% vicino · %3$d%% sotto</string>
     <string name="bias_reliability_sample_coverage">Cronologia usata: %1$d giorni in una finestra di %2$d giorni.</string>
-    <string name="bias_reliability_method_note">Indice locale basato su previsioni D+1 salvate e rianalisi Open-Meteo su date confrontabili. Giorno piovoso da 0,5 mm. Indicativo, non ufficiale.</string>
+    <string name="bias_reliability_method_note">Indice locale basato su previsioni D+1 salvate e rianalisi Open-Meteo su date confrontabili. Giorno piovoso da %1$s. Indicativo, non ufficiale.</string>
     <string name="bias_chip_calibrating_progress_a11y">Calibrazione: %1$d di %2$d campioni raccolti</string>
 
     <string name="sun_times_a11y">Alba alle %1$s, tramonto alle %2$s</string>
     <string name="mini_forecast_a11y_no_data">Previsione a 12 h non disponibile</string>
-    <string name="mini_forecast_a11y_no_rain">Previsione a 12 h: tra %1$d e %2$d gradi, nessuna pioggia prevista</string>
-    <string name="mini_forecast_a11y_with_rain">Previsione a 12 h: tra %1$d e %2$d gradi, pioggia prevista per %3$d ore</string>
+    <string name="mini_forecast_a11y_no_rain">Previsione a 12 h: tra %1$s e %2$s %3$s, nessuna pioggia prevista</string>
+    <string name="mini_forecast_a11y_with_rain">Previsione a 12 h: tra %1$s e %2$s %4$s, pioggia prevista per %3$d ore</string>
 
     <string name="widget_config_forecast_mode_mini_12h">Mini previsione a 12 ore</string>
     <string name="widget_config_forecast_mode_mini_12h_descr">Mostra le previsioni di temperatura e precipitazioni per le prossime 12 ore.</string>
@@ -434,11 +453,11 @@ dato</string>
     <string name="timeline_tomorrow_at">Domani · %1$s</string>
     <string name="timeline_precip_probability_source">mediana</string>
     <string name="timeline_precip_models_source">%1$d/%2$d modelli</string>
-    <string name="timeline_precip_amount">%1$.1f mm</string>
-    <string name="timeline_precip_amount_if_rain">%1$.1f mm se piove</string>
-    <string name="timeline_wind_gust">Raffica %1$d km/h</string>
+    <string name="timeline_precip_amount">%1$s %2$s</string>
+    <string name="timeline_precip_amount_if_rain">%1$s %2$s se piove</string>
+    <string name="timeline_wind_gust">Raffica %1$s %2$s</string>
     <string name="wind_gust_abbreviation">R</string>
-    <string name="wind_table_legend">Vento a 10 m · R = raffiche · km/h</string>
+    <string name="wind_table_legend">Vento a %1$s · R = raffiche · %2$s</string>
     <string name="timeline_consensus_high">Convergenza alta</string>
     <string name="timeline_consensus_medium">Convergenza media</string>
     <string name="timeline_consensus_low">Convergenza bassa</string>
@@ -484,8 +503,8 @@ dato</string>
     <string name="forecast_insight_metric_probability">%1$d%%</string>
     <string name="forecast_insight_metric_model_ratio">%1$d/%2$d modelli</string>
     <string name="forecast_insight_metric_coverage">%1$d/%2$d modelli</string>
-    <string name="forecast_insight_metric_wind">%1$d km/h</string>
-    <string name="forecast_insight_metric_temperature_range">%1$d° → %2$d°</string>
+    <string name="forecast_insight_metric_wind">%1$s %2$s</string>
+    <string name="forecast_insight_metric_temperature_range">%1$s%3$s → %2$s%3$s</string>
     <string name="forecast_insight_title_disagreement">Previsione incerta</string>
     <string name="forecast_insight_title_disagreement_multiple">Previsione molto incerta</string>
     <string name="forecast_insight_title_disagreement_rain">Divergenza sulla pioggia</string>
@@ -526,8 +545,8 @@ dato</string>
     <string name="forecast_insight_title_stable_compact">Nulla di rilevante nelle prossime 24 ore</string>
     <string name="forecast_insight_detail_stable_compact">I modelli restano nel complesso coerenti.</string>
     <string name="forecast_insight_metric_probability_range">%1$d–%2$d%%</string>
-    <string name="forecast_insight_metric_wind_range">%1$d–%2$d km/h</string>
-    <string name="forecast_insight_metric_temperature_scenarios">%1$d–%2$d°</string>
+    <string name="forecast_insight_metric_wind_range">%1$s–%2$s %3$s</string>
+    <string name="forecast_insight_metric_temperature_scenarios">%1$s–%2$s%3$s</string>
     <string name="forecast_insight_detail_rain_fused_uncertainty">Emerge un episodio, ma intensità o tempistica variano tra i modelli.</string>
     <string name="forecast_insight_detail_rain_thunderstorm_uncertain">Emerge un rischio di temporali, con tempistica ancora incerta.</string>
     <string name="forecast_insight_title_temperature_frost">Rischio di gelo</string>
@@ -536,12 +555,12 @@ dato</string>
     <string name="forecast_insight_title_temperature_uncertain">Temperatura incerta</string>
     <string name="forecast_insight_title_temperature_unusual_cooling">Raffreddamento insolito</string>
     <string name="forecast_insight_title_temperature_unusual_warming">Riscaldamento insolito</string>
-    <string name="forecast_insight_detail_temperature_frost">Le temperature potrebbero raggiungere o scendere sotto 0°.</string>
+    <string name="forecast_insight_detail_temperature_frost">Le temperature potrebbero raggiungere o scendere sotto %1$s.</string>
     <string name="forecast_insight_detail_temperature_heat">Potrebbe essere raggiunta una soglia di caldo rilevante.</string>
     <string name="forecast_insight_detail_temperature_uncertain">Gli scenari dei modelli mostrano un ampio intervallo di temperature.</string>
     <string name="forecast_insight_detail_temperature_unusual">Un cambiamento insolito per questa ora del giorno.</string>
-    <string name="forecast_insight_metric_precipitation">%1$.1f mm</string>
-    <string name="forecast_insight_metric_precipitation_range">%1$.1f–%2$.1f mm</string>
+    <string name="forecast_insight_metric_precipitation">%1$s %2$s</string>
+    <string name="forecast_insight_metric_precipitation_range">%1$s–%2$s %3$s</string>
     <string name="timeline_event_marker_precipitation">Episodio di pioggia</string>
     <string name="timeline_event_marker_wind">Episodio di vento</string>
     <string name="timeline_event_marker_temperature">Episodio di temperatura</string>
@@ -644,12 +663,12 @@ dato</string>
     <string name="action_refresh_marine">Aggiorna Mare / costa</string>
     <string name="marine_enabled">Modalità Mare / costa attivata</string>
     <string name="marine_refreshed">Dati Mare / costa aggiornati</string>
-    <string name="marine_not_coastal">Non è stato trovato alcun punto di griglia marino affidabile entro 50 km da questa città.</string>
+    <string name="marine_not_coastal">Non è stato trovato alcun punto di griglia marino affidabile entro %1$s da questa città.</string>
     <string name="marine_error">Impossibile caricare i dati marini: %1$s</string>
     <string name="marine_title">Mare / costa</string>
     <string name="marine_intro">Onde, swell, mare e maree</string>
     <string name="marine_current_conditions">Condizioni attuali</string>
-    <string name="marine_distance">Dati marini a %1$.1f km</string>
+    <string name="marine_distance">Dati marini a %1$s %2$s</string>
     <string name="marine_loading">Caricamento…</string>
     <string name="marine_wave_height">Altezza onde</string>
     <string name="marine_wave_period">Periodo</string>
@@ -707,8 +726,8 @@ dato</string>
     <!-- Vue graphique 7 jours -->
     <string name="graphic_view_title">Vista grafica</string>
     <string name="graphic_view_open">Apri vista grafica</string>
-    <string name="graphic_view_intro">Esplora i prossimi 7 giorni ora per ora</string>
-    <string name="graphic_view_subtitle">7 giorni · ora per ora</string>
+    <string name="graphic_view_intro">Esplora i prossimi 10 giorni ora per ora</string>
+    <string name="graphic_view_subtitle">10 giorni · ora per ora</string>
     <string name="graphic_view_touch_hint">Tocca un’ora sul grafico per visualizzare i valori dettagliati.</string>
     <string name="graphic_view_show_convergence">Mostra convergenza</string>
     <string name="graphic_view_show_convergence_desc">Colora leggermente i grafici in base all’accordo tra le famiglie di modelli.</string>
@@ -750,7 +769,6 @@ dato</string>
     <string name="engine_divergence_low">Scarto ridotto</string>
     <string name="engine_divergence_medium">Scarto moderato</string>
     <string name="engine_divergence_high">Scarto marcato</string>
-    <string name="engine_divergence_values">ΔT %1$.1f °C · pioggia %2$.1f mm · vento %3$.0f km/h · nuvole %4$d %%</string>
     <string name="engine_comparison_row_values">Min %1$s° · Max %2$s° · pioggia %3$s mm · probabilità %4$s%%</string>
     <string name="engine_metric_temp_max">T° max</string>
     <string name="engine_metric_temp_min">T° min</string>
@@ -758,7 +776,6 @@ dato</string>
     <string name="engine_metric_wind">Vento</string>
     <string name="engine_metric_gust">Raffiche</string>
     <string name="engine_metric_cloud">Nuvole</string>
-    <string name="engine_comparison_row_values_secondary">Attesa %1$s mm · vento %2$s km/h · raffiche %3$s km/h · nuvole %4$s%% · %5$s</string>
 
     <string name="engine_table_metric">Misura</string>
     <string name="engine_table_probability">Rischio pioggia</string>
@@ -842,40 +859,112 @@ dato</string>
     <string name="vigilance_phenomenon_avalanches">Valanghe</string>
     <string name="vigilance_phenomenon_coastal_flooding">Onde / sommersione costiera</string>
     <string name="vigilance_phenomenon_unknown">Fenomeno meteorologico</string>
-    <string name="home_temperature_trend_rising">Tendenza temperatura: in aumento verso %1$d°</string>
-    <string name="home_temperature_trend_falling">Tendenza temperatura: in calo verso %1$d°</string>
-    <string name="home_temperature_trend_stable">Tendenza temperatura: stabile intorno a %1$d°</string>
+    <string name="home_temperature_trend_rising">Tendenza temperatura: in aumento verso %1$s%2$s</string>
+    <string name="home_temperature_trend_falling">Tendenza temperatura: in calo verso %1$s%2$s</string>
+    <string name="home_temperature_trend_stable">Tendenza temperatura: stabile intorno a %1$s%2$s</string>
 
     <!-- Notifications météo locales -->
     <string name="settings_notifications_title">Notifiche</string>
     <string name="settings_notifications_desc">Calcolate sul dispositivo a partire dai tuoi modelli e dal tuo motore di previsione, senza server né account. Le previsioni vengono aggiornate con l’intervallo scelto sopra.</string>
     <string name="settings_notifications_daily">Riepilogo giornaliero</string>
-    <string name="settings_notifications_daily_desc">Ogni giorno all’ora scelta: la giornata in corso, oppure il giorno dopo a partire dalle 15.</string>
-    <string name="settings_notifications_daily_time">Ora del riepilogo: %1$s</string>
+    <string name="settings_notifications_daily_desc">Ogni giorno circa all’ora scelta: la giornata in corso. Android può ritardare l’invio in base ai vincoli di sistema.</string>
+    <string name="settings_notifications_daily_time">Ora approssimativa del riepilogo: %1$s</string>
     <string name="settings_notifications_time_confirm">OK</string>
     <string name="settings_notifications_divergence">Divergenza dei modelli</string>
     <string name="settings_notifications_divergence_desc" formatted="false">Quando la convergenza dei modelli scende sotto il 50 % per oggi o domani.</string>
-    <string name="settings_notifications_change">Cambio di previsione</string>
-    <string name="settings_notifications_change_desc">Quando la previsione viene rivista nettamente per i prossimi tre giorni (stesso segnale di «Da ricordare»).</string>
+    <string name="settings_notifications_change">Revisioni delle previsioni</string>
+    <string name="settings_notifications_change_desc">Un avviso «Da ricordare» quando una previsione cambia nettamente rispetto a circa 24 ore prima. Prima deve formarsi uno storico locale.</string>
     <string name="settings_notifications_cities">Città seguite</string>
     <string name="settings_notifications_no_city">Aggiungi una città ai preferiti per ricevere notifiche.</string>
     <string name="settings_notifications_blocked">Le notifiche di MeteoCompare sono disattivate su questo dispositivo.</string>
     <string name="settings_notifications_open_system">Consenti</string>
     <string name="notification_channel_daily">Riepilogo giornaliero</string>
-    <string name="notification_channel_daily_desc">Riepilogo della giornata per le città seguite, all’ora scelta.</string>
+    <string name="notification_channel_daily_desc">Riepilogo della giornata per le città seguite, circa all’ora scelta.</string>
     <string name="notification_channel_divergence">Divergenza dei modelli</string>
     <string name="notification_channel_divergence_desc">Quando i modelli sono in netto disaccordo per oggi o domani.</string>
-    <string name="notification_channel_change">Cambio di previsione</string>
-    <string name="notification_channel_change_desc">Quando la previsione viene rivista nettamente.</string>
+    <string name="notification_channel_change">Da ricordare · Revisioni</string>
+    <string name="notification_channel_change_desc">Quando una previsione a breve termine viene rivista nettamente.</string>
     <string name="notification_daily_title_today">%1$s · oggi</string>
     <string name="notification_daily_title_tomorrow">%1$s · domani</string>
     <string name="notification_daily_temperatures">%1$s / %2$s</string>
     <string name="notification_daily_precipitation">Pioggia %1$d %%</string>
-    <string name="notification_daily_precipitation_with_amount">Pioggia %1$d %% (%2$s mm)</string>
-    <string name="notification_daily_precipitation_amount">Pioggia %1$s mm</string>
-    <string name="notification_divergence_title">%1$s: i modelli divergono</string>
-    <string name="notification_divergence_text_today">Oggi la convergenza dei modelli è solo del %1$d %%: la previsione resta incerta.</string>
-    <string name="notification_divergence_text_tomorrow">Domani la convergenza dei modelli è solo del %1$d %%: la previsione resta incerta.</string>
-    <string name="notification_change_title">%1$s: la previsione cambia</string>
-    <string name="notification_change_text">%1$s (%2$s). %3$s</string>
+    <string name="notification_daily_precipitation_with_amount">Pioggia %1$d %% · %2$s %3$s</string>
+    <string name="notification_daily_precipitation_amount">Pioggia %1$s %2$s</string>
+    <string name="notification_divergence_title">%1$s · previsione incerta</string>
+    <string name="notification_change_title">%1$s · Da ricordare</string>
+
+    <!-- Contenu enrichi des notifications -->
+    <string name="notification_daily_temperature_range">Temperature · min %1$s · max %2$s</string>
+    <string name="notification_daily_agreement">Accordo dei modelli · %1$d %%</string>
+    <string name="notification_daily_wind">Vento · %1$s %2$s</string>
+    <string name="notification_day_today">Oggi</string>
+    <string name="notification_day_tomorrow">Domani</string>
+    <string name="notification_divergence_agreement">Accordo dei modelli · %1$d %%</string>
+    <string name="notification_divergence_compact">%1$s · solo %2$d %% di accordo tra i modelli</string>
+    <string name="notification_divergence_explanation">Gli scenari meteo divergono chiaramente. La previsione può ancora cambiare.</string>
+    <string name="notification_change_variable_temperature">Temperatura massima</string>
+    <string name="notification_change_variable_precipitation">Pioggia prevista</string>
+    <string name="notification_change_variable_wind">Vento massimo</string>
+    <string name="notification_change_revision_line">%1$s · %2$s</string>
+    <string name="notification_change_compact">%1$s · %2$s %3$s</string>
+    <string name="notification_change_volatile_line">%1$s · i modelli rivedono la previsione in direzioni diverse</string>
+    <string name="notification_change_volatile_compact">%1$s · %2$s · revisione incerta</string>
+    <string name="notification_change_consensus">%1$d modelli su %2$d confermano questa evoluzione</string>
+    <string name="notification_change_consensus_volatile">%1$d modelli confrontati · nessuna tendenza dominante</string>
+    <string name="notification_change_reference">Confrontato con la previsione di circa %1$d h fa</string>
+    <string name="settings_units">Unità</string>
+    <string name="settings_units_metric">Metrico (%1$s, %2$s, %3$s)</string>
+    <string name="settings_units_imperial">Imperiale (%1$s, %2$s, %3$s)</string>
+    <string name="toast_units_updated">Unità aggiornate</string>
+    <string name="unit_degrees_celsius">gradi Celsius</string>
+    <string name="unit_degrees_fahrenheit">gradi Fahrenheit</string>
+    <string name="unit_miles_per_hour">miglia orarie</string>
+    <string name="unit_inches">pollici</string>
+    <string name="unit_millimetres">millimetri</string>
+    <string name="a11y_hourly_measure_template">%1$s: %2$s all’inizio, %3$s alla fine. Accordo %4$d percento all’inizio, %5$d percento alla fine.</string>
+
+    <string name="radar_open">Apri radar pioggia</string>
+    <string name="radar_title">Radar pioggia</string>
+    <string name="radar_enter_fullscreen">Mostra la mappa a schermo intero</string>
+    <string name="radar_exit_fullscreen">Esci dallo schermo intero</string>
+    <string name="radar_mode">Modalità radar</string>
+    <string name="radar_observation">Osservazioni</string>
+    <string name="radar_projection">Proiezione</string>
+    <string name="radar_range">Portata radar</string>
+    <string name="radar_range_near">Vicino</string>
+    <string name="radar_range_regional">Regionale</string>
+    <string name="radar_range_wide">Ampia</string>
+    <string name="radar_unavailable">Il radar pioggia non è temporaneamente disponibile.</string>
+    <string name="radar_observed_window">Osservazioni radar · ultime 2 ore</string>
+    <string name="radar_projection_ready">Proiezione pronta</string>
+    <string name="radar_projection_waiting">Proiezione non disponibile · osservazioni disponibili</string>
+    <string name="radar_nowcast_analyzing">Analisi del movimento delle aree di pioggia…</string>
+    <string name="radar_nowcast_unavailable">Proiezione radar non disponibile; l’animazione osservata resta utilizzabile.</string>
+    <string name="radar_nowcast_uncertain">Il movimento radar è troppo incerto per una proiezione affidabile; l’animazione osservata resta utilizzabile.</string>
+    <string name="radar_play">Riproduci animazione</string>
+    <string name="radar_pause">Metti in pausa</string>
+    <string name="radar_projection_recalculate">Ricalcola proiezione</string>
+    <string name="radar_projection_recalculating">Ricalcolo della proiezione…</string>
+    <string name="radar_projection_cells">Aree di pioggia seguite singolarmente: %1$d</string>
+    <string name="radar_projection_detail">Velocità mediana ≈ %1$d km/h · confidenza media %2$d %%</string>
+    <string name="radar_impact_none">Nessuna area seguita sembra raggiungere direttamente la località nella prossima ora.</string>
+    <string name="radar_impact_current">%1$s interessa già la località e potrebbe restare fino a circa +%2$d min.</string>
+    <string name="radar_impact_current_leaving">%1$s interessa attualmente la località ma dovrebbe allontanarsi progressivamente.</string>
+    <string name="radar_impact_at">%1$s potrebbe raggiungere la località verso +%2$d min.</string>
+    <string name="radar_impact_window">%1$s potrebbe raggiungere la località tra circa +%2$d e +%3$d min.</string>
+    <string name="radar_impact_approaching">%1$s si avvicina alla località senza impatto diretto identificato entro un’ora.</string>
+    <string name="radar_reading_title">Lettura</string>
+    <string name="radar_reading_body">La modalità Osservazioni anima le ultime 2 ore. In Proiezione scegli +15, +30, +45 o +60 minuti per vedere il contorno proiettato, l’area probabile e la traiettoria.</string>
+    <string name="radar_privacy_note">Il radar contatta RainViewer e OpenStreetMap solo all’apertura. Le coordinate della località servono a centrare l’immagine radar.</string>
+    <string name="radar_attribution_osm">© OpenStreetMap contributors</string>
+    <string name="radar_attribution_rainviewer">Radar meteo di RainViewer</string>
+    <string name="radar_recalculation_failed">Il ricalcolo non è riuscito; viene mantenuta l’ultima proiezione disponibile.</string>
+    <string name="radar_intensity">Intensità</string>
+    <string name="radar_intensity_light">Debole</string>
+    <string name="radar_intensity_moderate">Moderata</string>
+    <string name="radar_intensity_heavy">Forte</string>
+    <string name="radar_probable_zone">Inviluppo probabile</string>
+    <string name="radar_forecast_zone">Contorno proiettato</string>
+    <string name="radar_observed_trajectory">Traiettoria osservata</string>
+    <string name="radar_projected_trajectory">Traiettoria proiettata</string>
 </resources>

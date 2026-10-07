@@ -1,6 +1,8 @@
 package com.meteocompare.app.di
 
+import android.content.Context
 import com.meteocompare.app.BuildConfig
+import com.meteocompare.app.core.network.CanonicalMetricUnitsInterceptor
 import com.meteocompare.app.core.network.MeteoCompareClientHeaderInterceptor
 import com.meteocompare.app.core.network.OpenMeteoClockDebugInterceptor
 import com.meteocompare.app.data.remote.ClimateArchiveApi
@@ -13,11 +15,14 @@ import com.meteocompare.app.data.remote.PreviousRunsApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
+import okhttp3.Cache
 import okhttp3.Dispatcher
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -57,6 +62,10 @@ annotation class MeteoCompareRetrofit
 @Retention(AnnotationRetention.BINARY)
 annotation class MeteoCompareOkHttp
 
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class RadarOkHttp
+
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
@@ -82,6 +91,7 @@ object NetworkModule {
         }
         return OkHttpClient.Builder()
             .dispatcher(dispatcher)
+            .addInterceptor(CanonicalMetricUnitsInterceptor())
             .apply {
                 if (BuildConfig.DEBUG) {
                     addInterceptor(OpenMeteoClockDebugInterceptor())
@@ -108,6 +118,31 @@ object NetworkModule {
     fun provideMeteoCompareOkHttp(client: OkHttpClient): OkHttpClient =
         client.newBuilder()
             .addInterceptor(MeteoCompareClientHeaderInterceptor())
+            .build()
+
+    /**
+     * Client réservé aux ressources radar/cartographiques.
+     *
+     * Le cache disque persistant est indispensable pour les tuiles
+     * tile.openstreetmap.org : OkHttp respecte nativement Cache-Control, Expires,
+     * ETag et Last-Modified et émet des requêtes conditionnelles lorsque nécessaire.
+     * Le cache reste dans cacheDir : il n'est pas sauvegardé par Android et peut
+     * être purgé automatiquement par le système en cas de pression disque.
+     */
+    @Provides
+    @Singleton
+    @RadarOkHttp
+    fun provideRadarOkHttp(
+        @ApplicationContext context: Context,
+        client: OkHttpClient
+    ): OkHttpClient =
+        client.newBuilder()
+            .cache(
+                Cache(
+                    directory = File(context.cacheDir, "radar-http"),
+                    maxSize = 64L * 1024L * 1024L
+                )
+            )
             .build()
 
     @Provides

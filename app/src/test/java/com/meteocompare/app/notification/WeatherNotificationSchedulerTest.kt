@@ -29,10 +29,14 @@ class WeatherNotificationSchedulerTest {
         workManager = mockk(relaxed = true)
     }
 
-    // ───────────────────────── delayUntilNext ─────────────────────────
+    // ───────────────────── prochaine occurrence quotidienne ─────────────────────
 
     @Test
     fun `heure a venir aujourd'hui`() {
+        assertEquals(
+            now.plusHours(1),
+            WeatherNotificationScheduler.nextDailyOccurrence(now, LocalTime.of(7, 0))
+        )
         assertEquals(
             Duration.ofHours(1),
             WeatherNotificationScheduler.delayUntilNext(now, LocalTime.of(7, 0))
@@ -43,11 +47,13 @@ class WeatherNotificationSchedulerTest {
     fun `heure deja atteinte - planifiee le lendemain`() {
         val atTarget = now.withHour(7)
         assertEquals(
+            atTarget.plusDays(1),
+            WeatherNotificationScheduler.nextDailyOccurrence(atTarget, LocalTime.of(7, 0))
+        )
+        assertEquals(
             Duration.ofDays(1),
             WeatherNotificationScheduler.delayUntilNext(atTarget, LocalTime.of(7, 0))
         )
-        // Un worker qui termine quelques secondes après l'heure cible ne se
-        // replanifie jamais pour la même journée.
         assertEquals(
             Duration.ofHours(24).minusSeconds(10),
             WeatherNotificationScheduler.delayUntilNext(atTarget.plusSeconds(10), LocalTime.of(7, 0))
@@ -58,86 +64,100 @@ class WeatherNotificationSchedulerTest {
     fun `passage a l'heure d'ete - l'heure locale est conservee`() {
         // Nuit du 28 au 29 mars 2026 : 02:00 CET → 03:00 CEST.
         val evening = ZonedDateTime.of(2026, 3, 28, 22, 0, 0, 0, paris)
+        val next = WeatherNotificationScheduler.nextDailyOccurrence(evening, LocalTime.of(7, 0))
+
+        assertEquals(LocalTime.of(7, 0), next.toLocalTime())
+        assertEquals(Duration.ofHours(8), Duration.between(evening, next))
+    }
+
+    @Test
+    fun `heure inexistante - le lendemain retrouve l heure choisie`() {
+        val afterGap = ZonedDateTime.parse("2026-03-29T04:00:00+02:00[Europe/Paris]")
         assertEquals(
-            Duration.ofHours(8),
-            WeatherNotificationScheduler.delayUntilNext(evening, LocalTime.of(7, 0))
+            ZonedDateTime.parse("2026-03-30T02:30:00+02:00[Europe/Paris]"),
+            WeatherNotificationScheduler.nextDailyOccurrence(afterGap, LocalTime.of(2, 30))
         )
     }
 
-    // ───────────────────────────── apply ─────────────────────────────
-
     @Test
-    fun `tout desactive - les deux travaux sont annules`() {
-        WeatherNotificationScheduler.apply(
-            workManager,
-            NotificationSettings(),
-            now,
-            ExistingWorkPolicy.REPLACE,
-            ExistingPeriodicWorkPolicy.UPDATE
+    fun `heure inexistante - occurrence du jour decalee puis retour a la normale`() {
+        val beforeGap = ZonedDateTime.parse("2026-03-29T01:00:00+01:00[Europe/Paris]")
+        val next = WeatherNotificationScheduler.nextDailyOccurrence(beforeGap, LocalTime.of(2, 30))
+        assertEquals(ZonedDateTime.parse("2026-03-29T03:30:00+02:00[Europe/Paris]"), next)
+        assertEquals(
+            ZonedDateTime.parse("2026-03-30T02:30:00+02:00[Europe/Paris]"),
+            WeatherNotificationScheduler.nextDailyOccurrence(next, LocalTime.of(2, 30))
         )
-
-        verify { workManager.cancelUniqueWork(WeatherNotificationScheduler.DAILY_SUMMARY_WORK_NAME) }
-        verify { workManager.cancelUniqueWork(WeatherNotificationScheduler.ALERTS_WORK_NAME) }
-        verify(exactly = 0) { workManager.enqueueUniqueWork(any(), any(), any<OneTimeWorkRequest>()) }
-        verify(exactly = 0) { workManager.enqueueUniquePeriodicWork(any(), any(), any()) }
     }
 
     @Test
-    fun `sans ville suivie - rien n'est planifie meme si un type est actif`() {
-        WeatherNotificationScheduler.apply(
-            workManager,
-            NotificationSettings(dailySummaryEnabled = true, divergenceAlertsEnabled = true),
-            now,
-            ExistingWorkPolicy.REPLACE,
-            ExistingPeriodicWorkPolicy.UPDATE
+    fun `heure double - choisit la premiere occurrence sans repeter le resume`() {
+        val beforeOverlap = ZonedDateTime.parse("2026-10-25T01:00:00+02:00[Europe/Paris]")
+        assertEquals(
+            ZonedDateTime.parse("2026-10-25T02:30:00+02:00[Europe/Paris]"),
+            WeatherNotificationScheduler.nextDailyOccurrence(beforeOverlap, LocalTime.of(2, 30))
         )
-
-        verify(exactly = 0) { workManager.enqueueUniqueWork(any(), any(), any<OneTimeWorkRequest>()) }
-        verify(exactly = 0) { workManager.enqueueUniquePeriodicWork(any(), any(), any()) }
-    }
-
-    @Test
-    fun `resume quotidien - travail unique differe jusqu'a l'heure choisie`() {
-        val request = slot<OneTimeWorkRequest>()
-
-        WeatherNotificationScheduler.apply(
-            workManager,
-            NotificationSettings(
-                dailySummaryEnabled = true,
-                dailySummaryTime = LocalTime.of(7, 30),
-                cityIds = setOf("paris")
-            ),
-            now,
-            ExistingWorkPolicy.REPLACE,
-            ExistingPeriodicWorkPolicy.UPDATE
-        )
-
-        verify {
-            workManager.enqueueUniqueWork(
-                WeatherNotificationScheduler.DAILY_SUMMARY_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                capture(request)
+        for (now in listOf(
+            ZonedDateTime.parse("2026-10-25T02:40:00+02:00[Europe/Paris]"),
+            ZonedDateTime.parse("2026-10-25T02:10:00+01:00[Europe/Paris]")
+        )) {
+            assertEquals(
+                ZonedDateTime.parse("2026-10-26T02:30:00+01:00[Europe/Paris]"),
+                WeatherNotificationScheduler.nextDailyOccurrence(now, LocalTime.of(2, 30))
             )
         }
-        assertEquals(Duration.ofMinutes(90).toMillis(), request.captured.workSpec.initialDelay)
-        assertEquals(
-            WeatherNotificationWorker.Kind.DAILY_SUMMARY.name,
-            request.captured.workSpec.input.getString(WeatherNotificationScheduler.KIND_INPUT_KEY)
-        )
-        // Les alertes restent désactivées.
-        verify { workManager.cancelUniqueWork(WeatherNotificationScheduler.ALERTS_WORK_NAME) }
     }
 
     @Test
-    fun `alertes - travail periodique avec reseau requis`() {
+    fun `expedited reserve a Android 12 et suivant pour tous les travaux immediats`() {
+        for (kind in WeatherNotificationWorker.Kind.entries) {
+            for (sdk in listOf(27, 28, 29, 30, 31, 35, 36)) {
+                val spec = WeatherNotificationScheduler.immediateRequest(kind, sdk).workSpec
+                assertEquals("API $sdk, $kind", sdk >= 31, spec.expedited)
+                assertEquals(0L, spec.initialDelay)
+                assertEquals(kind.name, spec.input.getString(WeatherNotificationScheduler.KIND_INPUT_KEY))
+            }
+        }
+    }
+
+    // ───────────────────────────── alertes WorkManager ─────────────────────────────
+
+    @Test
+    fun `alertes desactivees - periodique et kickoff sont annules`() {
+        WeatherNotificationScheduler.applyAlerts(
+            workManager = workManager,
+            settings = NotificationSettings(),
+            alertsPolicy = ExistingPeriodicWorkPolicy.UPDATE,
+            kickImmediately = true
+        )
+
+        verify { workManager.cancelUniqueWork(WeatherNotificationScheduler.ALERTS_WORK_NAME) }
+        verify { workManager.cancelUniqueWork(WeatherNotificationScheduler.ALERTS_IMMEDIATE_WORK_NAME) }
+        verify(exactly = 0) { workManager.enqueueUniquePeriodicWork(any(), any(), any()) }
+    }
+
+    @Test
+    fun `sans ville suivie - aucune alerte nest planifiee`() {
+        WeatherNotificationScheduler.applyAlerts(
+            workManager = workManager,
+            settings = NotificationSettings(divergenceAlertsEnabled = true),
+            alertsPolicy = ExistingPeriodicWorkPolicy.UPDATE,
+            kickImmediately = true
+        )
+
+        verify(exactly = 0) { workManager.enqueueUniquePeriodicWork(any(), any(), any()) }
+        verify(exactly = 0) { workManager.enqueueUniqueWork(any(), any(), any<OneTimeWorkRequest>()) }
+    }
+
+    @Test
+    fun `alertes - travail periodique sans contrainte reseau`() {
         val request = slot<PeriodicWorkRequest>()
 
-        WeatherNotificationScheduler.apply(
-            workManager,
-            NotificationSettings(forecastChangeAlertsEnabled = true, cityIds = setOf("paris")),
-            now,
-            ExistingWorkPolicy.KEEP,
-            ExistingPeriodicWorkPolicy.KEEP
+        WeatherNotificationScheduler.applyAlerts(
+            workManager = workManager,
+            settings = NotificationSettings(forecastChangeAlertsEnabled = true, cityIds = setOf("paris")),
+            alertsPolicy = ExistingPeriodicWorkPolicy.KEEP,
+            kickImmediately = false
         )
 
         verify {
@@ -152,11 +172,55 @@ class WeatherNotificationSchedulerTest {
             TimeUnit.HOURS.toMillis(WeatherNotificationScheduler.ALERTS_INTERVAL_HOURS),
             spec.intervalDuration
         )
-        assertEquals(androidx.work.NetworkType.CONNECTED, spec.constraints.requiredNetworkType)
+        assertEquals(androidx.work.NetworkType.NOT_REQUIRED, spec.constraints.requiredNetworkType)
+        assertEquals(true, spec.constraints.requiresBatteryNotLow())
         assertEquals(
             WeatherNotificationWorker.Kind.ALERTS.name,
             spec.input.getString(WeatherNotificationScheduler.KIND_INPUT_KEY)
         )
-        verify { workManager.cancelUniqueWork(WeatherNotificationScheduler.DAILY_SUMMARY_WORK_NAME) }
+        verify(exactly = 0) {
+            workManager.enqueueUniqueWork(
+                WeatherNotificationScheduler.ALERTS_IMMEDIATE_WORK_NAME,
+                any(),
+                any<OneTimeWorkRequest>()
+            )
+        }
+    }
+
+    @Test
+    fun `modification reglages - alertes controlees immediatement`() {
+        val request = slot<OneTimeWorkRequest>()
+
+        WeatherNotificationScheduler.applyAlerts(
+            workManager = workManager,
+            settings = NotificationSettings(divergenceAlertsEnabled = true, cityIds = setOf("paris")),
+            alertsPolicy = ExistingPeriodicWorkPolicy.UPDATE,
+            kickImmediately = true
+        )
+
+        verify {
+            workManager.enqueueUniqueWork(
+                WeatherNotificationScheduler.ALERTS_IMMEDIATE_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                capture(request)
+            )
+        }
+        assertEquals(
+            WeatherNotificationWorker.Kind.ALERTS.name,
+            request.captured.workSpec.input.getString(WeatherNotificationScheduler.KIND_INPUT_KEY)
+        )
+    }
+
+    @Test
+    fun `resume declenche par alarme utilise un work sans delai`() {
+        val request = WeatherNotificationScheduler.immediateRequest(
+            WeatherNotificationWorker.Kind.DAILY_SUMMARY
+        )
+
+        assertEquals(0L, request.workSpec.initialDelay)
+        assertEquals(
+            WeatherNotificationWorker.Kind.DAILY_SUMMARY.name,
+            request.workSpec.input.getString(WeatherNotificationScheduler.KIND_INPUT_KEY)
+        )
     }
 }

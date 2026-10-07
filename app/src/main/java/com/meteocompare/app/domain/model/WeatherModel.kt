@@ -333,6 +333,38 @@ enum class WeatherModel(
     ),
 
     /**
+     * Japan Meteorological Agency — GSM global.
+     *
+     * Maille plus grossière que les principaux modèles globaux de l'app, mais
+     * source institutionnelle indépendante et disponible sur toute la planète.
+     * Open-Meteo interpole ses pas natifs 6 h pour fournir la grille horaire.
+     */
+    JMA_GSM(
+        apiKey = "jma_gsm",
+        displayName = "JMA GSM",
+        resolutionKm = 55.0,
+        maxForecastDays = 11,
+        coverage = Coverage.GLOBAL,
+        family = ModelFamily.JMA
+    ),
+
+    /**
+     * NOAA AIGFS — prévision globale IA à 0,25°.
+     *
+     * Le modèle reste regroupé avec GFS dans le consensus afin que deux
+     * produits NOAA apparentés ne comptent pas comme deux votes entièrement
+     * indépendants.
+     */
+    NCEP_AIGFS(
+        apiKey = "ncep_aigfs025",
+        displayName = "NOAA AIGFS",
+        resolutionKm = 25.0,
+        maxForecastDays = 16,
+        coverage = Coverage.GLOBAL,
+        family = ModelFamily.NOAA
+    ),
+
+    /**
      * Google DeepMind WeatherNext 2 — modèle global fondé sur l'IA (0,25°).
      *
      * Open-Meteo ne le publie qu'en ensemble (64 membres) et uniquement via
@@ -379,13 +411,13 @@ enum class WeatherModel(
         /**
          * Modèles activés par défaut — choix MVP équilibré.
          *
-         * Composition : 1 fine-resolution local (AROME HD), 1 régional Europe
-         * pour utilisateurs européens (ICON EU), 3 globaux occidentaux (GFS,
-         * ECMWF, UKMO) et AIFS pour la comparaison IA vs physique. Les nouveaux
-         * modèles régionaux/globaux ajoutés ensuite (HRRR, MET Nordic,
-         * HARMONIE KNMI/DMI, BOM, GRAPES, GEM, ICON-D2, ICON-CH2, WeatherNext 2)
-         * restent opt-in via Settings — pertinents pour certains utilisateurs
-         * mais surchargeraient la 1re impression pour les autres.
+         * Composition : 3 modèles régionaux utiles en Europe et 6 modèles
+         * globaux issus de plusieurs institutions (NOAA, ECMWF, UKMO, JMA).
+         * Les deux sources IA (AIFS/AIGFS) restent équilibrées par famille dans
+         * le consensus, elles ne valent donc pas deux votes indépendants de
+         * leur modèle physique parent. Les autres modèles spécialisés (HRRR,
+         * MET Nordic, HARMONIE, BOM, GRAPES, GEM, ICON-D2/CH2,
+         * WeatherNext 2) restent opt-in.
          */
         val MVP_SELECTION: List<WeatherModel> = listOf(
             AROME_FRANCE_HD,
@@ -394,7 +426,9 @@ enum class WeatherModel(
             GFS,
             ECMWF,
             UKMO_GLOBAL,
-            ECMWF_AIFS
+            ECMWF_AIFS,
+            JMA_GSM,
+            NCEP_AIGFS
         )
 
         /** Résout une clé stockée/cache vers le modèle correspondant. */
@@ -438,6 +472,7 @@ enum class ModelFamily(val displayName: String) {
     CMA("CMA"),
     DMI("DMI"),
     METEOSWISS("MeteoSwiss"),
+    JMA("JMA"),
     GOOGLE("Google DeepMind")
 }
 

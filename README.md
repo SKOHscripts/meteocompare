@@ -4,7 +4,7 @@
 [![F-Droid](https://img.shields.io/f-droid/v/com.meteocompare.app)](https://f-droid.org/packages/com.meteocompare.app/)
 [![Liberapay patrons](https://img.shields.io/liberapay/patrons/Pat0chat.svg?logo=liberapay)](https://liberapay.com/Pat0chat)
 
-Application Android de comparaison multi-modèles météorologiques (AROME, ARPEGE, ICON, GFS, HRRR, ECMWF, UKMO, AIFS, GEM, MET Nordic, HARMONIE KNMI/DMI, ICON-CH2, ACCESS, GRAPES, WeatherNext 2…) basée sur l'API [Open-Meteo](https://open-meteo.com), avec Vigilance officielle Météo-France relayée par le Worker public MeteoCompare.
+Application Android de comparaison de **22 modèles météorologiques** (AROME, ARPEGE, ICON, GFS, HRRR, NOAA AIGFS, ECMWF IFS/AIFS, UKMO, GEM, JMA GSM, MET Nordic, HARMONIE KNMI/DMI, ICON-CH2, ACCESS, GRAPES, WeatherNext 2…) basée sur l'API [Open-Meteo](https://open-meteo.com), avec un horizon d'affichage allant jusqu'à **10 jours** et la Vigilance officielle Météo-France relayée par le Worker public MeteoCompare.
 
 L'app se concentre sur **les données brutes et l'incertitude** : au lieu d'agréger silencieusement les modèles en une seule prévision, elle expose les désaccords entre modèles pour que l'utilisateur puisse juger lui-même du niveau de confiance à accorder à la prévision.
 
@@ -19,12 +19,14 @@ Depuis la v1.0, l'app suit aussi **le biais historique de chaque modèle sur cha
   </a>
 </p>
 
+> 💝 **Vous aimez MeteoCompare ?** L'application est gratuite, libre, sans publicité et sans fonctions premium. Vous pouvez soutenir son développement via [Liberapay](https://liberapay.com/Pat0chat), [GitHub Sponsors](https://github.com/sponsors/Pat0chat) ou [Ko-Fi](https://ko-fi.com/pat0chat). Les dons restent entièrement facultatifs et ne changent pas les fonctionnalités disponibles.
+
 ## Fonctionnalités
 
-- **Comparaison multi-modèles** : jusqu'à 20 modèles météo (Météo-France, DWD, NOAA, ECMWF, UK Met Office, ECCC, MET Norway, KNMI, DMI, MeteoSwiss, BOM, CMA, plus les modèles IA d'ECMWF et de Google DeepMind)
+- **Comparaison multi-modèles** : jusqu'à **22 modèles météo** (Météo-France, DWD, NOAA, ECMWF, UK Met Office, ECCC, JMA, MET Norway, KNMI, DMI, MeteoSwiss, BOM, CMA, Google DeepMind), dont trois approches IA avec **ECMWF AIFS**, **NOAA AIGFS** et **WeatherNext 2** (opt-in), ainsi que le nouveau global **JMA GSM**
 - **Moteur de prévision V3 sélectionnable** : Multi-consensus robuste, Calibration locale, Scénarios et Adaptatif. Le moteur choisi pilote Home, Détails et widgets sans modifier les sorties brutes des modèles.
 - **Condition météo à consensus hiérarchique** : le moteur dédié `WeatherConditionConsensus` consolide les codes WMO par grandes familles météorologiques (précipitation / non-précipitation, puis ciel/brouillard et liquide/neige/verglas/orage) avant de choisir la condition précise. La branche ciel utilise la nébulosité centrale V3 pour éviter de sur-représenter « Couvert ».
-- **Comparaison des moteurs** : page dédiée calculant les quatre moteurs sur exactement le même forecast brut, sur 7 jours futurs dans le fuseau de la ville, avec graphiques Tmax/Tmin/pluie/vent/rafales/nuages et frise de divergence.
+- **Comparaison des moteurs** : page dédiée calculant les quatre moteurs sur exactement le même forecast brut, sur **10 jours futurs** dans le fuseau de la ville, avec graphiques Tmax/Tmin/pluie/vent/rafales/nuages et frise de divergence.
 - **Indice d’accord inter-modèles** calculé par variable (température, vent, précipitations) et par heure ; il décrit le spread des scénarios et n’est pas une probabilité de justesse
 - **Résumé « Aujourd’hui » enrichi** : quatre mini-cartes homogènes (température min/max, précipitations, vent) affichent la centrale du moteur sélectionné tout en conservant la plage, la dispersion et le niveau d’accord calculés exclusivement sur les modèles bruts
 - **Page "Pourquoi cette confiance ?"** — clic sur le badge de confiance ouvre une explication détaillée : qui a prédit quoi, quel écart, pourquoi la résolution du modèle compte
@@ -33,24 +35,27 @@ Depuis la v1.0, l'app suit aussi **le biais historique de chaque modèle sur cha
 - **Bande de confiance horaire multi-métriques** : sélecteur segmenté à 3 états pour basculer entre température, précipitations et vent — la bande se recalcule instantanément (précalcul dans le ViewModel). Graphique min-max autour de la centrale du moteur sélectionné, tandis que l’enveloppe et la convergence restent issues des modèles bruts et s’élargissent lorsque les modèles divergent
 - **Repères thermiques 10 ans en overlay** : Tmax/Tmin calendaires calculées sur la réanalyse ERA5 et affichées en traits pointillés sur la bande température. Les anciennes références pluie/vent journalières ne sont plus superposées aux graphes horaires, car les fenêtres temporelles ne sont pas comparables (et il ne s’agit pas de « normales climatiques » officielles sur 30 ans).
 - **Zoom au pincement** sur l'axe temps (double-tap pour réinitialiser)
-- **Toggle "par heure / par jour"** : bascule les tableaux entre la vue synthétique 7 jours et le détail horaire jusqu'à la fin de la journée courante
+- **Chart View 10 jours / 240 h** : vue graphique dédiée pour parcourir les prévisions **heure par heure sur 10 jours**, avec une fenêtre complète de 240 heures et les mêmes données multi-modèles que les autres vues
+- **Mode adaptatif tablettes et écrans larges** : navigation maître/détail avec liste des villes et prévision côte à côte sur tablettes, grands pliables et fenêtres Android redimensionnées ; l'interface compacte est conservée sur téléphone
+- **Toggle "par heure / par jour"** : bascule les tableaux entre la vue synthétique **10 jours** et le détail horaire compact de la journée courante
 - **Tableau Jour × Modèle** des conditions météo (icônes) et températures max/min, avec badges "%" indiquant la couverture nuageuse (cellules nuageuses/couvertes) ou la probabilité de pluie (cellules pluvieuses)
 - **Direction du vent** : flèches *downwind* dans les tableaux vent quand la vitesse dépasse 5 km/h (au-dessous, la direction est du bruit)
 - **Icônes de temps** synthétisées à partir des codes WMO 4677, dont un composite bi-color soleil + nuage pour "partiellement nuageux"
 - **"Fraîcheur" des données** affichée sur chaque carte : "Mis à jour à l'instant", "il y a 5 min", etc. — auto-rafraîchi au fil du temps
 - **Cartes Home compactes** : accent météo vertical sur le bord gauche, métriques resserrées, pastille « N scénarios » repliable et information de mise à jour réunies sur une seule ligne
 - **Vigilance officielle Météo-France** : pour les villes françaises uniquement, contrôle immédiat à l’ajout, affichage jaune/orange/rouge depuis `meteocompare.app/_mcx/vigilance`, détail des phénomènes et créneaux, et vagues-submersion dans la section marine. Les villes hors France ne déclenchent aucun appel Vigilance et la suppression d’un favori purge son état/cache Vigilance. Aucun secret Météo-France n’est embarqué dans l’APK.
+- **Radar pluie natif** : animation des observations RainViewer sur fond OpenStreetMap, trois portées (Proche/Régional/Large) et nowcast local par cellule à **+15 / +30 / +45 / +60 min** avec advection, évolution de forme, incertitude, trajectoires observée/projetée et estimation d’impact sur la localité. L’implémentation est 100 % Kotlin/Compose, sans WebView.
 - **Mode Mer / côte par localité** : la Home affiche une pastille bleue sur le menu `⋮` lorsqu’une localité est éligible au mode côtier, puis une icône 🌊 près du nom uniquement lorsque l’option est réellement activée. La page Détails affiche alors vagues, houle, température de mer et marées estimées. La décision d’éligibilité est mise en cache 6 h avec revalidation ; les données restent indicatives et ne sont pas destinées à la navigation.
 - **Heatmap 12 h intégrée aux cartes Home** : 12 cellules thermiques continues avec température par heure, trois repères horaires directement dans la bande et marqueur de pluie à partir de 30 %, sans ajouter une ligne supplémentaire sous la heatmap
 - **Chronologie visuelle sur la page détail** : timeline compacte des prochaines échéances avec heatmap de température, pluie, vent, accord inter-modèles et mise en évidence des changements significatifs
 - **Highlight du jour courant** (et de l'heure courante en mode hourly) dans tous les tableaux
-- **Notifications météo locales** (désactivées par défaut, villes favorites au choix) : résumé quotidien à l'heure choisie (journée en cours, ou lendemain après 15 h) selon le moteur sélectionné ; alerte de **divergence des modèles** quand la convergence passe sous 50 % pour aujourd'hui ou demain ; alerte de **changement de prévision** reprenant le signal « À retenir » du suivi d'évolution sur les trois prochains jours. Tout est calculé sur l'appareil via WorkManager (aucun serveur de push), chaque événement n'est notifié qu'une fois, et la fraîcheur réseau suit l'intervalle de rafraîchissement choisi
+- **Notifications météo locales** (désactivées par défaut, villes favorites au choix) : résumé quotidien à l'heure choisie ; alerte de **divergence des modèles** lorsque l'accord devient faible ; et **Révision des prévisions** lorsque « À retenir » détecte un changement important de température, pluie ou vent. Le contenu présente clairement la période, l'amplitude du changement et l'accord des modèles. Tout est calculé sur l'appareil via WorkManager, **sans serveur de push**, avec déduplication des événements
 - **Widgets écran d'accueil** (Glance) redimensionnables 2×1 / 3×1 / 4×1 / 4×2, avec en 4×2 le choix entre 4 prochaines heures, 4 prochains jours, ou une mini bande de confiance (T° / pluie / vent) avec valeurs par jour
 - **Tri des modèles dans les Settings** par zone / famille / finesse
 - **Batching multi-modèles** : les N modèles activés sont récupérés en 1 seule requête HTTPS (au lieu de N requêtes parallèles) — gain sur la latence et la batterie
 - **Modes clair/sombre**, thème dynamique Material You (Android 12+)
 - **Français + Anglais + Espagnol + Allemand + Italien** (widgets inclus — le rendu suit la préférence app, pas la locale système)
-- **Aucune publicité, aucun tracker** ; les connexions sortantes sont limitées aux API météo nécessaires (Open-Meteo et Worker Vigilance MeteoCompare)
+- **Aucune publicité, aucun tracker** ; les connexions sortantes sont limitées aux services nécessaires aux fonctions météo (Open-Meteo, Worker Vigilance MeteoCompare et, uniquement à l'ouverture du radar, RainViewer + OpenStreetMap)
 
 ## Stack technique
 
@@ -117,10 +122,12 @@ Listés dans `WeatherModel.kt` avec leur résolution native (km), leur horizon, 
 | ICON               | 11 km      | Global           | 7,5 j   | DWD                 |            |
 | ICON-D2            | 2 km       | Europe centrale  | 2 j     | DWD                 |            |
 | GFS                | 13 km      | Global           | 16 j    | NOAA (USA)          |     ✓      |
+| **NOAA AIGFS**     | **25 km**  | Global (**IA**)  | 16 j    | NOAA (USA)          |     ✓      |
 | ECMWF IFS HRES     | 9 km       | Global           | 15 j    | ECMWF (UE)          |     ✓      |
 | ECMWF AIFS         | 28 km      | Global (**IA**)  | 15 j    | ECMWF               |     ✓      |
 | UKMO Global        | 10 km      | Global           | 7 j     | UK Met Office       |     ✓      |
 | GEM Global         | 15 km      | Global           | 10 j    | ECCC (Canada)       |            |
+| **JMA GSM**        | **55 km**  | Global           | 11 j    | JMA (Japon)         |     ✓      |
 | **HRRR**           | **3 km**   | USA continental  | 18 h standard (48 h sur 00/06/12/18Z) | NOAA |            |
 | **MET Nordic**     | **1 km**   | Scandinavie      | 2,5 j   | MET Norway          |            |
 | **HARMONIE KNMI**  | **5.5 km** | Europe           | 2,5 j   | KNMI (Pays-Bas)     |            |
@@ -136,7 +143,8 @@ Les modèles marqués "Par défaut" sont activés dès la première ouverture ; 
 
 **Diversité éditoriale** du catalogue :
 
-- **ECMWF AIFS** est un modèle de prévision fondé sur l'IA/ML — il apporte un scénario méthodologiquement différent de l'IFS physique, sans recevoir de poids supérieur a priori
+- **ECMWF AIFS** et **NOAA AIGFS** ajoutent deux approches de prévision fondées sur l'IA/ML. Elles restent équilibrées par famille dans le consensus et ne reçoivent pas de poids supérieur a priori
+- **JMA GSM** ajoute une source globale institutionnelle indépendante produite par l'Agence météorologique japonaise, utile pour diversifier le pool au-delà de l'Europe et de l'Amérique du Nord
 - **HRRR** est le pendant américain d'AROME HD : rapid-refresh 3 km, particulièrement utile pour la convection estivale sur les États-Unis
 - **MET Nordic** offre la résolution la plus fine du catalogue (1 km) sur la Scandinavie — cousin arctique d'AROME HD
 - **HARMONIE KNMI + DMI** apportent deux domaines UWC-West distincts. Le moteur V3 les rattache à une même lignée de consensus pour éviter un double vote artificiel
@@ -255,7 +263,7 @@ Le batching réduit surtout le nombre de connexions, handshakes TLS et réveils 
 2. Sync Gradle (le wrapper sera téléchargé automatiquement la première fois).
 3. Lancer sur émulateur API 27+ ou device.
 
-Aucune clé API ni credential Météo-France n’est nécessaire dans Android : Open-Meteo est appelé directement et la Vigilance passe par le Worker public MeteoCompare, qui conserve ses secrets côté serveur.
+Aucune clé API ni credential Météo-France n’est nécessaire dans Android : Open-Meteo est appelé directement et la Vigilance passe par le Worker public MeteoCompare, qui conserve ses secrets côté serveur. Le radar utilise l’API publique RainViewer et les tuiles OpenStreetMap uniquement après ouverture explicite de cet écran.
 
 Par défaut, le build utilise `https://meteocompare.app/` comme base du Worker. Pour un environnement de test, elle peut être surchargée sans secret avec `-PVIGILANCE_BASE_URL=https://votre-worker.workers.dev/`. Seules les URL HTTPS sont acceptées.
 
@@ -288,19 +296,40 @@ Le module `ui/accessibility/A11yFormatter.kt` centralise les chaînes pour garde
 
 ## Politique de confidentialité
 
-Le fichier [PRIVACY.md](PRIVACY.md) à la racine est conforme aux exigences Play Store : zéro collecte de données, déclaration explicite des permissions, d’Open-Meteo, du Worker Vigilance et du stockage local.
+Le fichier [PRIVACY.md](PRIVACY.md) décrit les données traitées localement et les transmissions fonctionnelles vers Open-Meteo, le Worker Vigilance, RainViewer et OpenStreetMap. MeteoCompare n'intègre ni publicité, ni analytics, ni crash reporting distant, ni compte utilisateur.
 
-À héberger sur GitHub Pages ou un Gist public, puis fournir l'URL dans Play Console.
+Pour Google Play, la préparation du formulaire **Sécurité des données** est documentée dans [play-store/DATA_SAFETY.md](play-store/DATA_SAFETY.md). Les conditions et attributions des services radar/cartographiques sont suivies dans [THIRD_PARTY_SERVICES.md](THIRD_PARTY_SERVICES.md).
 
-## Soutenir le développement
+La politique de confidentialité doit être hébergée sur une URL publique puis renseignée dans Play Console.
 
-L'app est gratuite et open-source. Plusieurs options pour soutenir :
+## 💝 Soutenir MeteoCompare
 
-- [Liberapay](https://liberapay.com/Pat0chat) (contributions hebdomadaires)
-- [GitHub Sponsors](https://github.com/sponsors/Pat0chat) (contributions mensuelles)
-- [Ko-Fi](https://ko-fi.com/pat0chat) (contributions ponctuelles)
+MeteoCompare est développé **sans publicité, sans abonnement et sans fonctionnalités premium**. Si l'application vous est utile, un don aide directement à financer le temps consacré aux corrections, aux nouveaux modèles, aux nouvelles visualisations, aux tests et à la maintenance des publications.
 
-Aucun privilège n'est accordé aux donateurs — l'app et le code source restent identiques pour tous. Voir [DONATIONS.md](DONATIONS.md) pour plus de détails.
+- 💝 [Liberapay](https://liberapay.com/Pat0chat) — soutien récurrent FOSS-friendly
+- ❤️ [GitHub Sponsors](https://github.com/sponsors/Pat0chat) — soutien mensuel via GitHub
+- ☕ [Ko-Fi](https://ko-fi.com/pat0chat) — don ponctuel ou soutien mensuel
+
+Les dons sont **entièrement facultatifs** : aucun privilège, contenu exclusif ou fonction n'est réservé aux donateurs. L'application et le code source restent identiques pour tout le monde. Voir [DONATIONS.md](DONATIONS.md) pour les détails et les autres façons de contribuer.
+
+Merci à toutes les personnes qui soutiennent MeteoCompare.
+
+<!-- SPONSORS:START -->
+<p>No public sponsors yet ❤️</p>
+<!-- SPONSORS:END -->
+
+Chaque personne qui soutient MeteoCompare peut ajouter le badge suivant à son profil :
+
+```md
+[![MeteoCompare Supporter](https://raw.githubusercontent.com/Pat0chat/meteocompare/main/badges/LOGIN.png)](https://github.com/sponsors/Pat0chat)
+```
+
+À remplacer :
+
+- `OWNER` : propriétaire du dépôt où se trouvent les badges ;
+- `REPO` : nom de ce dépôt ;
+- `LOGIN` : login GitHub du sponsor en minuscules ;
+- `SPONSORABLE_LOGIN` : ton compte GitHub Sponsors.
 
 ## Roadmap
 
@@ -337,10 +366,14 @@ Fait :
 - ✅ v1.14.1 — Amélioration du mode tablette, ajout des indications Open Météo, couleurs dynamiques, amélioration de l'UI pour certains composants, corrections de bugs
 - ✅ v1.14.2 — Amélioration du mode tablette
 - ✅ v1.14.3 -> 4 — Corrections de bugs
-- ✅ v1.14.5 — Nouvelle vue "Chart View" qui affiche les prévisions par heure sur 7 jours
+- ✅ v1.14.5 — Nouvelle vue "Chart View", initialement sur 7 jours ; son horizon passe à 10 jours en v1.15.0
+- ✅ v1.15.0 — Nouveaux modèles AIGFS et GSM pour mieux couvrir le monde, horizon des prévisions augmenté à 10 jours, améliorations des perforamnces, corrections de bugs
+- ✅ v1.16.0 — Ajout d'un système de notifications (résumé journalier, changement de prévisions, évènements à venir), prise en charge des unités impériales (métriques par défaut), corrections de bugs (bias, widget's settings, requests et GC)
+- ✅ v1.16.1 — Correction des refreshs et requêtes inutiles, correction des notifications
+- ✅ v1.17.0 — Radar des pluies (observation et projection jusqu'à 60 minutes), amélioration des performances, correction de bugs 
 
 ## Licence
 
 [Apache License 2.0](LICENSE) — vous pouvez utiliser, modifier et redistribuer le code librement, à condition de conserver la notice de copyright.
 
-Les données météo sont fournies par [Open-Meteo](https://open-meteo.com) (également open-source, AGPL-3.0). Les modèles eux-mêmes sont produits par leurs organismes respectifs : Météo-France (AROME, ARPEGE), DWD (ICON, ICON-D2), NOAA (GFS, HRRR), ECMWF (IFS et AIFS), UK Met Office (UKMO), Environnement et Changement climatique Canada (GEM), MET Norway (MET Nordic), KNMI et DMI (HARMONIE), MeteoSwiss (ICON-CH2), Bureau of Meteorology Australie (ACCESS), China Meteorological Administration (GRAPES), Google DeepMind (WeatherNext 2).
+Les données météo sont fournies par [Open-Meteo](https://open-meteo.com) (également open-source, AGPL-3.0). Les modèles eux-mêmes sont produits par leurs organismes respectifs : Météo-France (AROME, ARPEGE), DWD (ICON, ICON-D2), NOAA (GFS, HRRR, AIGFS), ECMWF (IFS et AIFS), UK Met Office (UKMO), Environnement et Changement climatique Canada (GEM), Japan Meteorological Agency (GSM), MET Norway (MET Nordic), KNMI et DMI (HARMONIE), MeteoSwiss (ICON-CH2), Bureau of Meteorology Australie (ACCESS), China Meteorological Administration (GRAPES), Google DeepMind (WeatherNext 2).

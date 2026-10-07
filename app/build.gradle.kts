@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    id("androidx.baselineprofile")
 }
 
 // ─── Signing config : lit keystore.properties si présent, sinon env vars (CI) ──
@@ -56,8 +57,8 @@ android {
         applicationId = "com.meteocompare.app"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 37
-        versionName = "1.14.5"
+        versionCode = 41
+        versionName = "1.17.0"
         testInstrumentationRunner = "com.meteocompare.app.HiltTestRunner"
         buildConfigField("String", "METEOCOMPARE_BASE_URL", "\"$vigilanceBaseUrl\"")
         vectorDrawables { useSupportLibrary = true }
@@ -114,6 +115,19 @@ android {
                 debugSymbolLevel = "FULL"
             }
         }
+        // Build quasi-release dédié aux Macrobenchmarks.
+        // Non debuggable pour conserver des performances représentatives,
+        // profileable pour permettre la collecte de traces, et signé en debug
+        // afin d'être installable localement sans le keystore de production.
+        create("benchmark") {
+            initWith(getByName("release"))
+            // Benchmark proche de release mais installable localement.
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            // Indispensable pour obtenir des mesures réalistes.
+            isDebuggable = false
+        }
+
         debug {
             applicationIdSuffix = ".debug"
             if (forkTestKeystore.exists()) {
@@ -153,6 +167,10 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // AGP 9.4 aligne les bibliothèques natives non compressées pour les
+        // appareils à pages mémoire 16 KiB. On rend ce choix explicite afin
+        // d'éviter une régression accidentelle vers le legacy packaging.
+        jniLibs.useLegacyPackaging = false
         // Évite le warning "Unable to strip the following libraries" lors du
         // build sans NDK installé. Ces .so prébuilts viennent de dépendances
         // androidx (graphics.path, datastore.shared_counter) qui sont déjà
@@ -181,6 +199,13 @@ android {
 // Avec Kotlin intégré (AGP 9+), le jvmTarget Kotlin est automatiquement aligné
 // sur android.compileOptions.targetCompatibility (Java 17 ici).
 dependencies {
+    // Profil généré par le module :baselineprofile.
+    add("baselineProfile", project(":baselineprofile"))
+
+    // Installe le profil embarqué sur les versions Android qui en ont besoin
+    // et permet de vérifier localement son installation.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.appcompat)
@@ -239,6 +264,8 @@ dependencies {
     testImplementation(libs.byte.buddy.agent)
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Portable on-disk storage for JVM backup/restore tests, including Windows.
+    testImplementation(libs.androidx.datastore.core.okio)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)

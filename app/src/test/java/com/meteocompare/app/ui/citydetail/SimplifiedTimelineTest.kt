@@ -19,6 +19,52 @@ class SimplifiedTimelineTest {
     private val today = LocalDate.of(2026, 7, 23)
 
     @Test
+    fun `shared overview preserves hourly selection and daily fallback`() {
+        for (hourCount in listOf(0, 1, 2, 24)) {
+            val series = ForecastSeries(
+                model = WeatherModel.GFS,
+                hourly = HourlyForecast(
+                    timestamps = List(hourCount) { now.plusSeconds(it * 3_600L) },
+                    temperature2m = List(hourCount) { 20.0 },
+                    precipitation = List(hourCount) { 0.0 },
+                    windSpeed10m = List(hourCount) { 12.0 }
+                ),
+                daily = DailyForecast(
+                    dates = List(10) { today.plusDays(it.toLong()) },
+                    tempMax = List(10) { 22.0 }, tempMin = List(10) { 12.0 },
+                    precipitationSum = List(10) { 0.0 }, windSpeedMax = List(10) { 15.0 }
+                )
+            )
+            val forecast = CityForecast(paris, mapOf(WeatherModel.GFS to series))
+            val hourly = buildSimplifiedTimeline(forecast, DisplayMode.HOURLY, now)
+            val daily = buildSimplifiedTimeline(forecast, DisplayMode.DAILY, now)
+            assertEquals(buildOverviewTimeline(forecast, now), overviewFromTimelines(hourly, daily, paris.timezone))
+        }
+    }
+
+    @Test
+    fun `hourly window excludes outside samples and preserves both repeated DST hours`() {
+        val autumnNow = Instant.parse("2026-10-25T00:00:00Z")
+        val timestamps = List(27) { autumnNow.plusSeconds((it - 1L) * 3_600L) }
+        val series = ForecastSeries(
+            model = WeatherModel.GFS,
+            hourly = HourlyForecast(
+                timestamps = timestamps,
+                temperature2m = List(27) { it.toDouble() },
+                precipitation = List(27) { 0.0 }, windSpeed10m = List(27) { 12.0 }
+            ),
+            daily = DailyForecast(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+        )
+        val forecast = CityForecast(paris.copy(timezone = "Europe/Paris"), mapOf(WeatherModel.GFS to series))
+        val points = buildSimplifiedTimeline(forecast, DisplayMode.HOURLY, autumnNow)
+        assertEquals(timestamps.subList(1, 25), points.map { it.instant })
+        assertEquals(24, points.size)
+        // 02h CEST puis 02h CET : ce sont bien deux créneaux distincts.
+        assertEquals(autumnNow, points[0].instant)
+        assertEquals(autumnNow.plusSeconds(3_600L), points[1].instant)
+    }
+
+    @Test
     fun `hourly analysis and displayed overview keep every hour of the 24 hour window`() {
         val timestamps = List(24) { index -> now.plusSeconds(index * 3600L) }
         val hourlySeries = ForecastSeries(
@@ -53,8 +99,8 @@ class SimplifiedTimelineTest {
     }
 
     @Test
-    fun `hourly analysis can expose the full seven day graphic horizon`() {
-        val hours = 24 * 7
+    fun `hourly analysis can expose the full ten day shared horizon`() {
+        val hours = 24 * 10
         val timestamps = List(hours) { index -> now.plusSeconds(index * 3_600L) }
         val hourlySeries = ForecastSeries(
             model = WeatherModel.GFS,
@@ -84,7 +130,7 @@ class SimplifiedTimelineTest {
         )
 
         assertEquals(24, defaultTimeline.size)
-        assertEquals(168, graphicTimeline.size)
+        assertEquals(240, graphicTimeline.size)
         assertEquals(270, graphicTimeline.first().windDirectionDeg)
         assertEquals(270, graphicTimeline.last().windDirectionDeg)
     }
@@ -119,6 +165,34 @@ class SimplifiedTimelineTest {
         val amountConvergence = point.precipitationAmountConvergencePercent
         assertTrue(amountConvergence != null)
         assertTrue(requireNotNull(amountConvergence) < 100)
+    }
+
+    @Test
+    fun `daily timeline uses the shared ten day horizon`() {
+        val dates = List(12) { today.plusDays(it.toLong()) }
+        val dailySeries = ForecastSeries(
+            model = WeatherModel.GFS,
+            hourly = emptyHourly(),
+            daily = DailyForecast(
+                dates = dates,
+                tempMax = List(12) { 20.0 + it },
+                tempMin = List(12) { 10.0 + it },
+                precipitationSum = List(12) { 0.0 },
+                windSpeedMax = List(12) { 15.0 },
+                weatherCode = List(12) { 1 }
+            )
+        )
+        val forecast = CityForecast(paris, mapOf(WeatherModel.GFS to dailySeries))
+
+        val timeline = buildSimplifiedTimeline(
+            forecast = forecast,
+            mode = DisplayMode.DAILY,
+            now = now,
+            dailyHorizonDays = 10
+        )
+
+        assertEquals(10, timeline.size)
+        assertEquals(dates.take(10), timeline.mapNotNull { it.date })
     }
 
     @Test

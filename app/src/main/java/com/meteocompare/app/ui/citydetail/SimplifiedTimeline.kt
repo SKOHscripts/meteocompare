@@ -1,5 +1,9 @@
 package com.meteocompare.app.ui.citydetail
 
+import com.meteocompare.app.core.units.WeatherUnit
+import com.meteocompare.app.core.units.WeatherUnits
+import com.meteocompare.app.core.units.LocalWeatherUnits
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -7,6 +11,7 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,7 +57,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
+import com.meteocompare.app.core.units.weatherStringResource as stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -90,8 +95,9 @@ internal fun SimplifiedTimelineCard(
     events: List<ForecastEvent> = emptyList(),
     focusPoint: SimplifiedTimelinePoint? = null,
     focusRequestId: Int = 0,
-    onModeChange: ((DisplayMode) -> Unit)? = null,
-    availableModes: Set<DisplayMode> = setOf(mode),
+    range: TimelineRange = TimelineRange.defaultFor(mode),
+    onRangeChange: ((TimelineRange) -> Unit)? = null,
+    availableRanges: Set<TimelineRange> = setOf(range),
     layout: TimelineLayout = TimelineLayout.COLUMNS,
     onLayoutChange: ((TimelineLayout) -> Unit)? = null,
     now: Instant = Instant.now(),
@@ -171,27 +177,27 @@ internal fun SimplifiedTimelineCard(
 
                 if (
                     onLayoutChange != null ||
-                    (onModeChange != null && availableModes.size > 1)
+                    (onRangeChange != null && availableRanges.size > 1)
                 ) {
-                    val showModeSelector = onModeChange != null && availableModes.size > 1
+                    val showModeSelector = onRangeChange != null && availableRanges.size > 1
                     val showLayoutSelector = onLayoutChange != null
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (showModeSelector) {
-                            TimelineDisplayModeSelector(
-                                mode = mode,
-                                availableModes = availableModes,
-                                onModeChange = requireNotNull(onModeChange)
+                            TimelineRangeSelector(
+                                range = range,
+                                availableRanges = availableRanges,
+                                onRangeChange = requireNotNull(onRangeChange)
                             )
                         }
 
                         if (showLayoutSelector) {
-                            Spacer(Modifier.weight(1f))
                             TimelineLayoutSelector(
                                 layout = layout,
                                 onLayoutChange = requireNotNull(onLayoutChange)
@@ -280,10 +286,10 @@ internal fun SimplifiedTimelineCard(
 }
 
 @Composable
-private fun TimelineDisplayModeSelector(
-    mode: DisplayMode,
-    availableModes: Set<DisplayMode>,
-    onModeChange: (DisplayMode) -> Unit
+private fun TimelineRangeSelector(
+    range: TimelineRange,
+    availableRanges: Set<TimelineRange>,
+    onRangeChange: (TimelineRange) -> Unit
 ) {
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(14.dp)
@@ -300,16 +306,16 @@ private fun TimelineDisplayModeSelector(
             .testTag(TAG_TIMELINE_MODE_SELECTOR),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DisplayMode.entries
-            .filter { it in availableModes }
+        TimelineRange.entries
+            .filter { it in availableRanges }
             .forEach { option ->
 
-                val selected = option == mode
+                val selected = option == range
 
                 val label = stringResource(
                     when (option) {
-                        DisplayMode.HOURLY -> R.string.display_mode_hourly
-                        DisplayMode.DAILY -> R.string.display_mode_daily
+                        TimelineRange.HOURLY -> R.string.display_mode_hourly
+                        TimelineRange.DAILY -> R.string.display_mode_daily
                     }
                 )
 
@@ -328,7 +334,7 @@ private fun TimelineDisplayModeSelector(
                             role = Role.RadioButton,
                             onClick = {
                                 if (!selected) {
-                                    onModeChange(option)
+                                    onRangeChange(option)
                                 }
                             }
                         )
@@ -598,7 +604,8 @@ private fun TimelinePointColumn(
     windAccent: Color,
     isFirst: Boolean,
     isLast: Boolean,
-    isFocused: Boolean
+    isFocused: Boolean,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val separatorColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
     val focusColor = MaterialTheme.colorScheme.primary
@@ -720,12 +727,12 @@ private fun TimelinePointColumn(
 
         TimelineMetric(
             icon = Icons.Outlined.Air,
-            value = point.windKmh?.let { "${it.roundToInt()} km/h" } ?: "—",
+            value = point.windKmh?.let { units.speed(it) } ?: "—",
             tint = windAccent
         )
         TimelineSupportingText(
             text = point.windGustKmh?.let {
-                stringResource(R.string.timeline_wind_gust, it.roundToInt())
+                stringResource(R.string.timeline_wind_gust, it)
             } ?: "—"
         )
 
@@ -740,7 +747,8 @@ private fun TemperatureHeatmapBand(
     point: SimplifiedTimelinePoint,
     mode: DisplayMode,
     isFirst: Boolean,
-    isLast: Boolean
+    isLast: Boolean,
+    units: WeatherUnits = LocalWeatherUnits.current
 ) {
     val surface = MaterialTheme.colorScheme.surfaceContainerLow
     val noData = MaterialTheme.colorScheme.surfaceVariant
@@ -807,13 +815,13 @@ private fun TemperatureHeatmapBand(
             DisplayMode.HOURLY -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = point.temperatureC?.let { "${it.roundToInt()}°" } ?: "—",
+                        text = point.temperatureC?.let { units.temp(it) } ?: "—",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = contentColor,
                         maxLines = 1
                     )
-                    temperatureRangeLabel(point, mode)?.let { range ->
+                    temperatureRangeLabel(point, mode, units = units)?.let { range ->
                         Text(
                             text = range,
                             style = MaterialTheme.typography.labelSmall,
@@ -824,8 +832,8 @@ private fun TemperatureHeatmapBand(
                 }
             }
             DisplayMode.DAILY -> {
-                val high = point.tempMaxC?.roundToInt()?.let { "$it°" } ?: "—"
-                val low = point.tempMinC?.roundToInt()?.let { "$it°" } ?: "—"
+                val high = units.temp(point.tempMaxC)
+                val low = units.temp(point.tempMinC)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -880,13 +888,14 @@ private fun PrecipitationHeatIndicator(
 
 private fun temperatureRangeLabel(
     point: SimplifiedTimelinePoint,
-    mode: DisplayMode
+    mode: DisplayMode,
+    units: WeatherUnits
 ): String? {
     if (mode != DisplayMode.HOURLY) return null
-    val min = point.temperatureMinAcrossModels?.roundToInt() ?: return null
-    val max = point.temperatureMaxAcrossModels?.roundToInt() ?: return null
+    val min = point.temperatureMinAcrossModels ?: return null
+    val max = point.temperatureMaxAcrossModels ?: return null
     if (max - min < 1) return null
-    return "$min–$max°"
+    return "${units.value(min, WeatherUnit.TEMPERATURE_COMPACT)}–${units.temp(max)}"
 }
 
 @Composable

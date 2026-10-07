@@ -1,5 +1,6 @@
 package com.meteocompare.app.ui.citylist
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.meteocompare.app.BuildConfig
@@ -26,8 +27,10 @@ import com.meteocompare.app.domain.util.ForecastAggregates
 import com.meteocompare.app.domain.util.WeatherScenarioBuilder
 import com.meteocompare.app.domain.util.forecastPresentationTicks
 import com.meteocompare.app.domain.util.hasForecastPresentationChanged
+import com.meteocompare.app.notification.WeatherNotificationScheduler
 import com.meteocompare.app.ui.components.AppToastEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Clock
 import java.time.Instant
 import javax.inject.Inject
@@ -70,6 +73,7 @@ sealed interface MarineFeedback {
 @HiltViewModel
 @OptIn(FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class CityListViewModel @Inject constructor(
+    @param:ApplicationContext private val appContext: Context,
     private val cityRepository: CityRepository,
     private val forecastRepository: ForecastRepository,
     private val marineRepository: MarineRepository,
@@ -91,10 +95,6 @@ class CityListViewModel @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     private val _isOnline = MutableStateFlow(networkMonitor.isOnline())
     private val marineLoadingIds = MutableStateFlow<Set<String>>(emptySet())
-    /** Villes validées comme côtières, indépendamment de l'activation de Mer / côte. */
-    private val marineAvailableIds = MutableStateFlow<Set<String>>(emptySet())
-    private val marineAvailabilityCheckedAt = mutableMapOf<String, Long>()
-    private val marineAvailabilityJobs = mutableMapOf<String, Job>()
     private val _marineFeedback = Channel<MarineFeedback>(capacity = Channel.BUFFERED)
     val marineFeedback = _marineFeedback.receiveAsFlow()
     private val _actionFeedback = Channel<AppToastEvent>(capacity = Channel.BUFFERED)
@@ -127,13 +127,8 @@ class CityListViewModel @Inject constructor(
     private val appliedConfigGenerationByCity = mutableMapOf<String, Long>()
     private val appliedRequestedModelsByCity = mutableMapOf<String, Set<WeatherModel>>()
 
-    private val marineUiState = combine(
-        marineLoadingIds,
-        marineAvailableIds
-    ) { loading, available -> loading to available }
-
-    private val auxiliaryUiState = combine(marineUiState, vigilanceById) { marine, vigilance ->
-        marine to vigilance
+    private val auxiliaryUiState = combine(marineLoadingIds, vigilanceById) { marineLoading, vigilance ->
+        marineLoading to vigilance
     }
 
     val uiState: StateFlow<CityListUiState> = combine(
@@ -143,15 +138,13 @@ class CityListViewModel @Inject constructor(
         _isOnline,
         auxiliaryUiState
     ) { cities, cache, refreshing, online, auxiliary ->
-        val (marineState, vigilance) = auxiliary
-        val (marineLoading, marineAvailable) = marineState
+        val (marineLoading, vigilance) = auxiliary
         CityListUiState(
             items = cities.map { city ->
                 CityCardState(
                     city = city,
                     forecast = cache[city.id] ?: ForecastState.Loading,
                     vigilance = vigilance[city.id]?.takeIf { city.isFrenchLocation },
-                    isMarineAvailable = city.marineEnabled || city.id in marineAvailable,
                     isMarineLoading = city.id in marineLoading
                 )
             },
@@ -230,9 +223,9 @@ class CityListViewModel @Inject constructor(
                     // sauterait. Le repository limite toujours le réseau via TTL.
                     vigilanceJobs.values.forEach { it.cancel() }
                     vigilanceJobs.clear()
-                    // Une seule porte d'entrée remet à jour prévisions, Mer / côte
-                    // et Vigilance. Les repositories conservent leurs propres TTL :
-                    // ce rappel ne force donc aucune requête superflue.
+                    // Une seule porte d'entrée remet à jour prévisions et Vigilance.
+                    // La partie marine reste strictement pilotée par l'action utilisateur
+                    // et n'est jamais sondée automatiquement au retour réseau.
                     refreshIfStale()
                 }
             }
@@ -403,10 +396,9 @@ class CityListViewModel @Inject constructor(
         // C'est le rattrapage immédiat après une longue veille du process.
         viewModelScope.launch { recalculatePresentation(clock.instant()) }
         val cities = favoriteCitiesById.values.toList()
-        // Les données auxiliaires ont des TTL indépendantes du forecast. Elles
-        // doivent elles aussi être revalidées à ON_RESUME, même si une lecture
-        // forecast est déjà en cours ou si l'intervalle est MANUAL.
-        syncMarineAvailability(cities)
+        // La Vigilance a son propre TTL et peut être revalidée à ON_RESUME.
+        // La partie marine, elle, n'est jamais préchargée : elle ne doit accéder
+        // au repository qu'après une action explicite de l'utilisateur dans le menu.
         syncVigilance(cities)
         // Ne pas court-circuiter hors ligne : Room peut avoir été actualisée
         // par le widget avant la perte réseau. Le repository émet ce cache et
@@ -491,17 +483,10 @@ class CityListViewModel @Inject constructor(
             rawForecastsById.update { it - id }
             appliedConfigGenerationByCity.remove(id)
             appliedRequestedModelsByCity.remove(id)
-            marineAvailabilityJobs.remove(id)?.cancel()
-            marineAvailabilityCheckedAt.remove(id)
-            marineAvailableIds.update { it - id }
             clearVigilanceTracking(id)
         }
 
         syncVigilance(cities)
-
-        // La disponibilité Mer / côte est distincte de son activation : on la
-        // détecte discrètement pour pouvoir signaler l'option dans le menu.
-        syncMarineAvailability(cities)
 
         val config = models to interval
         val configChanged = lastStreamConfig?.let { it != config } ?: true
@@ -595,108 +580,6 @@ class CityListViewModel @Inject constructor(
         lastStreamConfig = config
     }
 
-    /**
-     * Valide en arrière-plan la disponibilité du mode côtier pour les favoris.
-     * Un cache marin encore frais est utilisé en priorité. Une décision de
-     * disponibilité expire après la même fenêtre de 6 h que le cache ; elle
-     * peut alors être revalidée. En cas d'échec réseau, la ville reste éligible
-     * à un nouveau contrôle au prochain retour en ligne.
-     */
-    private fun syncMarineAvailability(cities: List<City>) {
-        cities.forEach { city ->
-            if (city.marineEnabled) {
-                marineAvailabilityCheckedAt[city.id] = clock.millis()
-                marineAvailableIds.update { it + city.id }
-                return@forEach
-            }
-            if (isMarineAvailabilityDecisionFresh(city.id) || city.id in marineAvailabilityJobs) return@forEach
-
-            val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-                val ownJob = coroutineContext[Job]
-                var checkedWhileOffline = false
-                try {
-                    val cached = runSuspendCatching {
-                        marineRepository.getFreshCached(city.id)
-                    }.getOrNull()
-                    if (cached != null) {
-                        marineAvailabilityCheckedAt[city.id] = cached.fetchedAtEpochMs
-                        if (cached.coastal) {
-                            marineAvailableIds.update { it + city.id }
-                            syncVigilance(listOf(city))
-                        } else marineAvailableIds.update { it - city.id }
-                        return@launch
-                    }
-                    if (!networkMonitor.isOnline()) {
-                        checkedWhileOffline = true
-                        // Hors ligne, une ancienne décision reste utile pour
-                        // l'indication visuelle. On conserve son timestamp
-                        // d'origine afin qu'elle soit revalidée dès le retour
-                        // réseau au lieu de prolonger artificiellement sa TTL.
-                        val stale = runSuspendCatching {
-                            marineRepository.getCached(city.id)
-                        }.getOrNull()
-                        if (stale != null) {
-                            marineAvailabilityCheckedAt[city.id] = stale.fetchedAtEpochMs
-                            if (stale.coastal) {
-                                marineAvailableIds.update { it + city.id }
-                                syncVigilance(listOf(city))
-                            } else marineAvailableIds.update { it - city.id }
-                        }
-                        return@launch
-                    }
-
-                    val result = runSuspendCatching {
-                        marineRepository.getMarine(city, forceRefresh = false)
-                    }.getOrNull()
-                    when (result) {
-                        is ApiResult.Success -> {
-                            marineAvailabilityCheckedAt[city.id] = result.data.fetchedAtEpochMs
-                            if (result.data.coastal) {
-                                marineAvailableIds.update { it + city.id }
-                                syncVigilance(listOf(city))
-                            } else {
-                                marineAvailableIds.update { it - city.id }
-                            }
-                        }
-                        else -> Unit // retry possible au prochain changement réseau/config
-                    }
-                } finally {
-                    if (marineAvailabilityJobs[city.id] === ownJob) {
-                        marineAvailabilityJobs.remove(city.id)
-
-                        // Une réponse de cache hors ligne peut mettre à jour la UI
-                        // juste avant que ce job ne soit retiré. Si le réseau revient
-                        // exactement dans cette fenêtre, le collector réseau voit
-                        // encore un job actif et ne lance pas la revalidation. Une fois
-                        // ce job terminé, aucun nouvel événement réseau n'arriverait :
-                        // on ferme donc explicitement cette race en relançant le check
-                        // si (et seulement si) ce job a réellement suivi le chemin
-                        // hors ligne et que sa décision reste expirée.
-                        if (
-                            checkedWhileOffline &&
-                            networkMonitor.isOnline() &&
-                            !city.marineEnabled &&
-                            !isMarineAvailabilityDecisionFresh(city.id)
-                        ) {
-                            syncMarineAvailability(listOf(city))
-                        }
-                    }
-                }
-            }
-            marineAvailabilityJobs[city.id] = job
-            job.start()
-        }
-    }
-
-    private fun isMarineAvailabilityDecisionFresh(cityId: String): Boolean {
-        val checkedAt = marineAvailabilityCheckedAt[cityId] ?: return false
-        // Une correction NTP peut faire reculer l'horloge après le contrôle.
-        // Traiter alors la décision comme toute fraîche évite un appel réseau
-        // à chaque reprise jusqu'à ce que l'horloge rattrape le timestamp.
-        val ageMs = (clock.millis() - checkedAt).coerceAtLeast(0L)
-        return ageMs < MarineRepository.AVAILABILITY_CACHE_TTL_MS
-    }
-
     // ─── Actions utilisateur ────────────────────────────────────────────────
 
     fun onSearchQueryChanged(query: String) {
@@ -740,6 +623,39 @@ class CityListViewModel @Inject constructor(
                 _actionFeedback.send(AppToastEvent.error(R.string.toast_city_remove_error))
                 return@launch
             }
+
+            // Une ville supprimée ne doit pas rester suivie silencieusement par
+            // les notifications. La mise à jour atomique évite aussi le cas où
+            // le dernier ID obsolète maintiendrait des workers sans ville réelle.
+            var notificationCleanupFailed = false
+            runSuspendCatching {
+                userPreferences.updateNotificationSettings { settings ->
+                    settings.copy(cityIds = settings.cityIds - cityId)
+                }
+            }.onSuccess { notificationSettings ->
+                runCatching {
+                    WeatherNotificationScheduler.reschedule(
+                        appContext,
+                        notificationSettings,
+                        kickAlertsImmediately = false
+                    )
+                }.onFailure { error ->
+                    notificationCleanupFailed = true
+                    android.util.Log.w(
+                        "MeteoCompare/Notif",
+                        "Unable to reschedule notifications after removing city=$cityId",
+                        error
+                    )
+                }
+            }.onFailure { error ->
+                notificationCleanupFailed = true
+                android.util.Log.w(
+                    "MeteoCompare/Notif",
+                    "Unable to remove city=$cityId from notification settings",
+                    error
+                )
+            }
+
             // Nettoyage explicite après la suppression utilisateur. Une émission
             // DataStore vide transitoire ne doit jamais effacer le cache météo.
             runSuspendCatching { forecastRepository.clearCacheForCity(cityId) }
@@ -774,8 +690,12 @@ class CityListViewModel @Inject constructor(
                 }
             }
             _actionFeedback.send(
-                removedCity?.let { AppToastEvent.success(R.string.toast_city_removed, it.name) }
-                    ?: AppToastEvent.success(R.string.toast_city_removed_generic)
+                if (notificationCleanupFailed) {
+                    AppToastEvent.warning(R.string.toast_city_removed_notification_warning)
+                } else {
+                    removedCity?.let { AppToastEvent.success(R.string.toast_city_removed, it.name) }
+                        ?: AppToastEvent.success(R.string.toast_city_removed_generic)
+                }
             )
         }
     }
@@ -783,20 +703,16 @@ class CityListViewModel @Inject constructor(
     /** Active le mode côtier après validation du point marin, ou rafraîchit le cache existant. */
     fun onMarineAction(city: City) {
         if (city.id in marineLoadingIds.value) return
-        marineAvailabilityJobs.remove(city.id)?.cancel()
         viewModelScope.launch {
             marineLoadingIds.update { it + city.id }
             try {
                 runSuspendCatching {
                     when (val result = marineRepository.getMarine(city, forceRefresh = true)) {
                         is ApiResult.Success -> {
-                            marineAvailabilityCheckedAt[city.id] = result.data.fetchedAtEpochMs
                             if (!result.data.coastal) {
-                                marineAvailableIds.update { it - city.id }
                                 _marineFeedback.send(MarineFeedback.NotCoastal)
                             } else {
-                                marineAvailableIds.update { it + city.id }
-                                syncVigilance(listOf(city))
+                                syncVigilance(listOf(city.copy(marineEnabled = true)))
                                 if (!city.marineEnabled) {
                                     cityRepository.setMarineEnabled(city.id, true)
                                     _marineFeedback.send(MarineFeedback.Enabled)
@@ -995,8 +911,7 @@ class CityListViewModel @Inject constructor(
         vigilanceById.update { it - cityId }
     }
 
-    private fun includeCoastForVigilance(city: City): Boolean =
-        city.marineEnabled || city.id in marineAvailableIds.value
+    private fun includeCoastForVigilance(city: City): Boolean = city.marineEnabled
 
     private suspend fun refreshVigilance(city: City, forceRefresh: Boolean) {
         if (!city.isFrenchLocation) {

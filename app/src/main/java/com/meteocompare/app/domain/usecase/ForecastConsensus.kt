@@ -22,7 +22,7 @@ object ForecastConsensus {
     enum class Group {
         MF_AROME, MF_ARPEGE, DWD_ICON, ECMWF_GLOBAL,
         NOAA_GFS, NOAA_HRRR, UKMO_GLOBAL, ECCC_GEM,
-        METNO_NORDIC, UWC_HARMONIE, BOM_ACCESS, CMA_GRAPES,
+        METNO_NORDIC, UWC_HARMONIE, BOM_ACCESS, CMA_GRAPES, JMA_GSM,
         GOOGLE_WEATHERNEXT
     }
 
@@ -32,7 +32,7 @@ object ForecastConsensus {
         WeatherModel.ICON_D2, WeatherModel.ICON_EU, WeatherModel.ICON_GLOBAL,
         WeatherModel.METEOSWISS_ICON_CH2 -> Group.DWD_ICON
         WeatherModel.ECMWF, WeatherModel.ECMWF_AIFS -> Group.ECMWF_GLOBAL
-        WeatherModel.GFS -> Group.NOAA_GFS
+        WeatherModel.GFS, WeatherModel.NCEP_AIGFS -> Group.NOAA_GFS
         WeatherModel.HRRR_CONUS -> Group.NOAA_HRRR
         WeatherModel.UKMO_GLOBAL -> Group.UKMO_GLOBAL
         WeatherModel.GEM_GLOBAL -> Group.ECCC_GEM
@@ -40,6 +40,7 @@ object ForecastConsensus {
         WeatherModel.KNMI_HARMONIE_EU, WeatherModel.DMI_HARMONIE_EU -> Group.UWC_HARMONIE
         WeatherModel.BOM_ACCESS -> Group.BOM_ACCESS
         WeatherModel.CMA_GRAPES -> Group.CMA_GRAPES
+        WeatherModel.JMA_GSM -> Group.JMA_GSM
         WeatherModel.GOOGLE_WEATHERNEXT2 -> Group.GOOGLE_WEATHERNEXT
     }
 
@@ -105,14 +106,21 @@ object ForecastConsensus {
         val groups = unique.groupBy(::groupFor)
         return buildMap {
             groups.values.forEach { siblings ->
-                val raw = siblings.associateWith { model ->
-                    (localWeights[model] ?: 1.0).takeIf(Double::isFinite)?.coerceIn(0.5, 1.5) ?: 1.0
-                }
-                val total = raw.values.sum().takeIf { it > 0.0 } ?: 1.0
+                // Pas de dictionnaire temporaire par famille et par créneau.
+                // Les deux parcours gardent l'ordre et les bornes du calcul original.
+                var total = 0.0
+                siblings.forEach { model -> total += boundedLocalWeight(localWeights[model]) }
                 val groupMass = (total / siblings.size).coerceIn(0.75, 1.25)
-                siblings.forEach { model -> put(model, raw.getValue(model) / total * groupMass) }
+                siblings.forEach { model ->
+                    put(model, boundedLocalWeight(localWeights[model]) / total * groupMass)
+                }
             }
         }
+    }
+
+    private fun boundedLocalWeight(raw: Double?): Double {
+        val weight = raw ?: 1.0
+        return if (weight.isFinite()) weight.coerceIn(0.5, 1.5) else 1.0
     }
 
     fun continuous(
@@ -383,7 +391,7 @@ object ForecastConsensus {
     fun weightedMedian(entries: List<WeightedEntry>): Double? {
         val rows = entries
             .filter { it.value.isFinite() && it.weight.isFinite() && it.weight > 0.0 }
-            .sortedBy { it.value }
+            .sortedWith { left, right -> left.value.compareTo(right.value) }
         if (rows.isEmpty()) return null
         val total = rows.sumOf { it.weight }
         val half = total / 2.0

@@ -1,5 +1,10 @@
 package com.meteocompare.app.ui.citydetail
 
+import com.google.common.util.concurrent.ListenableFuture
+import java.util.concurrent.ExecutionException
+import androidx.work.Operation
+import com.meteocompare.app.data.worker.BiasHistoryRefreshState
+import kotlinx.coroutines.launch
 import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -7,6 +12,8 @@ import app.cash.turbine.test
 import com.meteocompare.app.core.network.ApiResult
 import com.meteocompare.app.core.network.NetworkMonitor
 import com.meteocompare.app.data.worker.BiasRefreshScheduler
+import com.meteocompare.app.domain.model.BiasSample
+import com.meteocompare.app.domain.model.BiasVariable
 import com.meteocompare.app.domain.model.City
 import com.meteocompare.app.domain.model.CityDetailContentTab
 import com.meteocompare.app.domain.model.CityDetailSection
@@ -20,6 +27,7 @@ import com.meteocompare.app.domain.model.ForecastSeries
 import com.meteocompare.app.domain.model.HourlyForecast
 import com.meteocompare.app.domain.model.RefreshInterval
 import com.meteocompare.app.domain.model.WeatherModel
+import com.meteocompare.app.domain.repository.BiasSampleRepository
 import com.meteocompare.app.domain.repository.CityRepository
 import com.meteocompare.app.domain.repository.ClimateNormalsRepository
 import com.meteocompare.app.domain.repository.ForecastEvolutionHistoryData
@@ -35,6 +43,8 @@ import com.meteocompare.app.domain.usecase.ForecastEngineContextProvider
 import com.meteocompare.app.testutil.MutableClock
 import com.meteocompare.app.ui.navigation.Destinations
 import io.mockk.coEvery
+import io.mockk.clearMocks
+import io.mockk.spyk
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -63,6 +73,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -145,7 +156,9 @@ class CityDetailViewModelTest {
 
     private fun buildViewModel(
         cityId: String = "1",
-        clock: Clock = testClock
+        clock: Clock = testClock,
+        biasRepository: BiasSampleRepository = mockk(relaxed = true),
+        contextProvider: ForecastEngineContextProvider = engineContextProvider
     ): CityDetailViewModel {
         val saved = SavedStateHandle(mapOf(Destinations.CITY_DETAIL_ARG to cityId))
         return CityDetailViewModel(
@@ -164,13 +177,13 @@ class CityDetailViewModelTest {
             // Le VM combinera un Flow amont qui n'émet jamais avec les prefs mockées ;
             // biasState restera à EMPTY, ce qui ne perturbe pas la logique existante
             // testée ici (loadInitial, refresh, applyResult).
-            biasSampleRepository = mockk(relaxed = true),
+            biasSampleRepository = biasRepository,
             computeBias = mockk(relaxed = true),
             forecastEvolutionRepository = evolutionRepo,
             computeForecastEvolution = ComputeForecastEvolutionUseCase(),
             clock = clock,
             computationDispatcher = dispatcher,
-            engineContextProvider = engineContextProvider
+            engineContextProvider = contextProvider
         ).also(createdViewModels::add)
     }
 
@@ -309,7 +322,7 @@ class CityDetailViewModelTest {
         runViewModelTest {
             mockkObject(BiasRefreshScheduler)
             try {
-                every { BiasRefreshScheduler.triggerManualRefresh(any<android.content.Context>()) } returns Unit
+                every { BiasRefreshScheduler.triggerManualRefresh(any<android.content.Context>()) } returns enqueueOperation()
                 val vm = buildViewModel()
 
                 vm.refreshFeedback.test {
@@ -342,6 +355,77 @@ class CityDetailViewModelTest {
                 unmockkObject(BiasRefreshScheduler)
             }
         }
+
+    private fun enqueueOperation(error: Throwable? = null): Operation {
+        val future = mockk<ListenableFuture<Operation.State.SUCCESS>> {
+            every { isDone } returns true
+            every { get() } answers {
+                if (error != null) throw ExecutionException(error)
+                Operation.SUCCESS
+            }
+        }
+        return mockk { every { result } returns future }
+    }
+
+    @Test
+    fun `rattrapage - echec asynchrone permet une nouvelle demande puis suit le worker`() = runViewModelTest {
+        mockkObject(BiasRefreshScheduler)
+        try {
+            val work = MutableStateFlow(BiasHistoryRefreshState.IDLE)
+            every { BiasRefreshScheduler.observeManualRefresh(any()) } returns work
+            every { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) } returns
+                enqueueOperation(IllegalStateException("enqueue failed asynchronously"))
+            val vm = buildViewModel()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                vm.biasHistoryRefreshState.collect {}
+            }
+            vm.requestBiasHistory()
+            runCurrent()
+            assertEquals(BiasHistoryRefreshState.FAILED, vm.biasHistoryRefreshState.value)
+            assertEquals(false, vm.biasHistoryRefreshState.value.isActive)
+            every { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) } answers {
+                work.value = BiasHistoryRefreshState.QUEUED
+                enqueueOperation()
+            }
+            vm.requestBiasHistory()
+            runCurrent()
+            assertEquals(BiasHistoryRefreshState.QUEUED, vm.biasHistoryRefreshState.value)
+            vm.requestBiasHistory()
+            verify(exactly = 2) { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) }
+            work.value = BiasHistoryRefreshState.RUNNING
+            runCurrent()
+            assertEquals(BiasHistoryRefreshState.RUNNING, vm.biasHistoryRefreshState.value)
+            work.value = BiasHistoryRefreshState.SUCCEEDED
+            runCurrent()
+            assertEquals(false, vm.biasHistoryRefreshState.value.isActive)
+            vm.requestBiasHistory()
+            runCurrent()
+            verify(exactly = 3) { BiasRefreshScheduler.triggerManualRefresh(any<Context>()) }
+        } finally {
+            unmockkObject(BiasRefreshScheduler)
+        }
+    }
+
+    @Test
+    fun `rattrapage - nouvel ecran retrouve un travail deja en attente ou termine`() = runViewModelTest {
+        mockkObject(BiasRefreshScheduler)
+        try {
+            val work = MutableStateFlow(BiasHistoryRefreshState.QUEUED)
+            every { BiasRefreshScheduler.observeManualRefresh(any()) } returns work
+            val vm = buildViewModel()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                vm.biasHistoryRefreshState.collect {}
+            }
+            runCurrent()
+            assertEquals(BiasHistoryRefreshState.QUEUED, vm.biasHistoryRefreshState.value)
+            work.value = BiasHistoryRefreshState.FAILED
+            runCurrent()
+            assertEquals(BiasHistoryRefreshState.FAILED, vm.biasHistoryRefreshState.value)
+            assertEquals(false, vm.biasHistoryRefreshState.value.isActive)
+        } finally {
+            unmockkObject(BiasRefreshScheduler)
+        }
+    }
 
     @Test
     fun `detail preferences - expose et persiste le mode et l onglet`() =
@@ -556,6 +640,53 @@ class CityDetailViewModelTest {
             assertTrue(vm.state.value is CityDetailUiState.Loaded)
             assertTrue(vm.evolutionState.value is ForecastEvolutionState.Error)
         }
+
+    @Test
+    fun `bias updates leave forecasts unchanged for engines without calibration`() = runViewModelTest {
+        for (engine in listOf(ForecastEngine.MULTI_CONSENSUS, ForecastEngine.SCENARIOS)) {
+            checkBiasUpdate(engine, shouldRecalculate = false)
+        }
+    }
+
+    @Test
+    fun `bias updates still refresh calibration and adaptive forecasts`() = runViewModelTest {
+        for (engine in listOf(ForecastEngine.CALIBRATION, ForecastEngine.ADAPTIVE)) {
+            checkBiasUpdate(engine, shouldRecalculate = true)
+        }
+    }
+
+    private suspend fun TestScope.checkBiasUpdate(engine: ForecastEngine, shouldRecalculate: Boolean) {
+        forecastEngineFlow.value = engine
+        val samples = MutableStateFlow<List<BiasSample>>(emptyList())
+        val biasRepository: BiasSampleRepository = mockk(relaxed = true) {
+            every { observeSamples(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(emptyList())
+            every {
+                observeSamples(any(), WeatherModel.GFS, BiasVariable.TEMPERATURE, any(), any(), any(), 1)
+            } returns samples
+        }
+        val forecast = buildScenarioForecast(paris)
+        coEvery {
+            forecastRepo.getCityForecastStream(eq(paris), any(), any(), any(), any())
+        } returns flowOf(ApiResult.Success(forecast))
+        val contextProvider = spyk(ForecastEngineContextProvider(biasRepository))
+        val vm = buildViewModel(biasRepository = biasRepository, contextProvider = contextProvider)
+        runCurrent()
+        val before = vm.state.value as CityDetailUiState.Loaded
+        clearMocks(contextProvider, answers = false)
+        samples.value = List(21) {
+            BiasSample(LocalDate.of(2026, 6, 28).minusDays(it + 1L), forecast = 25.0, observation = 20.0)
+        }
+        runCurrent()
+        assertEquals(samples.value, vm.biasState.value.temperature.historyByModel[WeatherModel.GFS])
+        val after = vm.state.value as CityDetailUiState.Loaded
+        if (shouldRecalculate) {
+            assertNotEquals(before.engineContext.calibrationByVariable, after.engineContext.calibrationByVariable)
+        } else {
+            assertSame(before, after)
+            coVerify(exactly = 0) { contextProvider.build(any(), any(), any()) }
+        }
+        vm.viewModelScope.cancel()
+    }
 
     @Test
     fun `changement de moteur recalcule Details sans nouvelle requete`() = runViewModelTest {
@@ -815,7 +946,7 @@ class CityDetailViewModelTest {
                 forecastRepo.getCityForecastStream(
                     eq(paris),
                     any(),
-                    eq(7),
+                    eq(11),
                     eq(false),
                     eq(RefreshInterval.DEFAULT.millis)
                 )
@@ -843,7 +974,7 @@ class CityDetailViewModelTest {
             forecastRepo.getCityForecastStream(
                 eq(paris),
                 any(),
-                eq(7),
+                eq(11),
                 eq(false),
                 eq(Long.MAX_VALUE)
             )

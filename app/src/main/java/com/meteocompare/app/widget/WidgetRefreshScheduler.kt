@@ -81,6 +81,7 @@ internal object WidgetRefreshScheduler {
      */
     private const val WORK_NAME = "meteocompare_widget_refresh"
     private const val IMMEDIATE_WORK_NAME = "meteocompare_widget_refresh_now"
+    private const val CATCH_UP_WORK_NAME = "meteocompare_widget_refresh_catch_up"
     private const val WORK_TAG = "meteocompare_widget"
 
     /**
@@ -182,8 +183,9 @@ internal object WidgetRefreshScheduler {
      * Déclenche un tick unique en plus du périodique. Utilisé quand une
      * préférence qui affecte le widget change dans Settings :
      *
-     *   - Modèles activés (impacte les URLs Open-Meteo et donc le cache)
+     *   - Modèles activés (impactent les URLs Open-Meteo et donc le cache)
      *   - Intervalle de rafraîchissement (impacte `maxCacheAgeMs`)
+     *   - Unités / moteur (rendu local depuis le même cache, sans forcer le réseau)
      *
      * Sans ce trigger, un toggle de modèle mettrait jusqu'à 15 min à se
      * refléter sur l'écran d'accueil — expérience frustrante quand l'user
@@ -193,17 +195,80 @@ internal object WidgetRefreshScheduler {
      * périodique : même logique, même filtre ghost-IDs.
      */
     fun triggerImmediateRefresh(context: Context) {
-        triggerImmediateRefresh(WorkManager.getInstance(context.applicationContext))
+        val appContext = context.applicationContext
+        val widgetLookup = runCatching {
+            WidgetReceivers.anyAlive(
+                appContext,
+                AppWidgetManager.getInstance(appContext)
+            )
+        }
+        if (!shouldEnqueueImmediateRefresh(widgetLookup)) {
+            return
+        }
+        widgetLookup.exceptionOrNull()?.let { error ->
+            // En cas de launcher/OEM défaillant, préserver l'ancien comportement :
+            // mieux vaut tenter un tick que laisser un widget réellement présent figé.
+            android.util.Log.w(
+                WIDGET_LOG_TAG,
+                "Unable to inspect installed widgets before immediate refresh",
+                error
+            )
+        }
+        triggerImmediateRefresh(WorkManager.getInstance(appContext))
     }
+
+    /**
+     * Décision pure pour le garde d'enqueue immédiat. Un lookup fiable à
+     * `false` supprime le wake-up inutile ; un échec conserve le comportement
+     * historique par sécurité pour les launchers OEM atypiques.
+     */
+    internal fun shouldEnqueueImmediateRefresh(widgetLookup: Result<Boolean>): Boolean =
+        widgetLookup.getOrElse { true }
 
     /** Overload testable : voir [schedule] pour la justification. */
     internal fun triggerImmediateRefresh(workManager: WorkManager) {
+        enqueueOneTimeRefresh(
+            workManager = workManager,
+            workName = IMMEDIATE_WORK_NAME,
+            policy = ExistingWorkPolicy.REPLACE,
+            force = true
+        )
+    }
+
+    /**
+     * Rattrapage léger lors du retour de l'application au premier plan.
+     *
+     * Contrairement à [triggerImmediateRefresh], ce chemin ne contourne PAS
+     * le garde de cadence du worker. Il permet à un launcher/OEM ayant retardé
+     * le périodique de reprendre la main rapidement, tout en évitant de
+     * reconstruire le widget à chaque aller-retour app ↔ écran d'accueil.
+     */
+    fun triggerCatchUpRefresh(context: Context) {
+        triggerCatchUpRefresh(WorkManager.getInstance(context.applicationContext))
+    }
+
+    /** Overload testable du rattrapage non forcé. */
+    internal fun triggerCatchUpRefresh(workManager: WorkManager) {
+        enqueueOneTimeRefresh(
+            workManager = workManager,
+            workName = CATCH_UP_WORK_NAME,
+            policy = ExistingWorkPolicy.KEEP,
+            force = false
+        )
+    }
+
+    private fun enqueueOneTimeRefresh(
+        workManager: WorkManager,
+        workName: String,
+        policy: ExistingWorkPolicy,
+        force: Boolean
+    ) {
         val request = OneTimeWorkRequestBuilder<WidgetRefreshWorker>()
-            .setInputData(workDataOf(FORCE_REFRESH_KEY to true))
-            // Les callbacks explicites (configuration, ouverture de l'app,
-            // fallback AppWidgetManager) doivent être servis sans attendre le
-            // prochain quota périodique. Si le quota expedited est épuisé,
-            // WorkManager conserve le job en mode normal plutôt que de le jeter.
+            .setInputData(workDataOf(FORCE_REFRESH_KEY to force))
+            // Les callbacks explicites et le rattrapage OEM doivent pouvoir
+            // être servis sans attendre le prochain quota périodique. Si le
+            // quota expedited est épuisé, WorkManager conserve le job en mode
+            // normal plutôt que de le jeter.
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
@@ -213,8 +278,8 @@ internal object WidgetRefreshScheduler {
             .addTag(WORK_TAG)
             .build()
         workManager.enqueueUniqueWork(
-            IMMEDIATE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
+            workName,
+            policy,
             request
         )
     }
@@ -232,6 +297,7 @@ internal object WidgetRefreshScheduler {
     internal fun cancel(workManager: WorkManager) {
         workManager.cancelUniqueWork(WORK_NAME)
         workManager.cancelUniqueWork(IMMEDIATE_WORK_NAME)
+        workManager.cancelUniqueWork(CATCH_UP_WORK_NAME)
     }
 
     /**
@@ -243,6 +309,7 @@ internal object WidgetRefreshScheduler {
 
     internal const val TESTABLE_WORK_NAME: String = WORK_NAME
     internal const val TESTABLE_IMMEDIATE_WORK_NAME: String = IMMEDIATE_WORK_NAME
+    internal const val TESTABLE_CATCH_UP_WORK_NAME: String = CATCH_UP_WORK_NAME
     internal const val TESTABLE_WORK_TAG: String = WORK_TAG
 }
 
@@ -464,8 +531,9 @@ internal class WidgetRefreshWorker(
     }
 
     companion object {
-        // Le periodic et un refresh immédiat ont des noms WorkManager distincts
-        // et peuvent donc se chevaucher. Un seul worker process-wide évite deux
+        // Le periodic, le refresh forcé et le rattrapage ont des noms
+        // WorkManager distincts et peuvent donc se chevaucher. Un seul worker
+        // process-wide évite deux
         // écritures Glance/RemoteViews concurrentes ; le cache réseau reste de
         // toute façon coalescé par ForecastRepositoryImpl.
         private val RUN_MUTEX = Mutex()

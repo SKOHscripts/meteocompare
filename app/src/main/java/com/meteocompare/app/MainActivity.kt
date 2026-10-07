@@ -1,5 +1,9 @@
 package com.meteocompare.app
 
+import androidx.compose.runtime.CompositionLocalProvider
+import com.meteocompare.app.core.units.LocalWeatherUnits
+import com.meteocompare.app.core.units.WeatherUnits
+
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.os.Bundle
@@ -42,8 +46,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themePreference by viewModel.themePreference.collectAsStateWithLifecycle()
-            MeteoCompareTheme(themePreference = themePreference) {
-                AppNavHost()
+            val unitSystem by viewModel.unitSystem.collectAsStateWithLifecycle()
+            CompositionLocalProvider(LocalWeatherUnits provides WeatherUnits(unitSystem)) {
+                MeteoCompareTheme(themePreference = themePreference) {
+                    AppNavHost()
+                }
             }
         }
     }
@@ -53,7 +60,9 @@ class MainActivity : ComponentActivity() {
         // Chaque retour réel au premier plan est une occasion de rattrapage
         // pour les launchers OEM qui ont différé les travaux en arrière-plan.
         // Le travail porte un nom unique et le garde évite tout enqueue quand
-        // aucun widget n'est posé.
+        // aucun widget n'est posé. Le rattrapage est volontairement NON forcé :
+        // le worker conserve son garde de 15 minutes afin qu'un simple aller-
+        // retour app ↔ launcher ne reconstruise pas le widget en boucle.
         lifecycleScope.launch(Dispatchers.IO) {
             val hasWidgets = runCatching {
                 WidgetReceivers.anyAlive(
@@ -71,7 +80,7 @@ class MainActivity : ComponentActivity() {
             if (hasWidgets) {
                 runCatching {
                     WidgetRefreshScheduler.schedule(applicationContext)
-                    WidgetRefreshScheduler.triggerImmediateRefresh(applicationContext)
+                    WidgetRefreshScheduler.triggerCatchUpRefresh(applicationContext)
                 }.onFailure { error ->
                     // Un WorkManager temporairement indisponible ne doit jamais
                     // faire échouer la reprise de l'activité principale.

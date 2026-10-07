@@ -28,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,6 +53,7 @@ import com.meteocompare.app.ui.components.AppToastLayer
 import com.meteocompare.app.ui.enginecomparison.EngineComparisonScreen
 import com.meteocompare.app.ui.graphicview.GraphicForecastScreen
 import com.meteocompare.app.ui.help.HowItWorksScreen
+import com.meteocompare.app.ui.radar.RadarScreen
 import com.meteocompare.app.ui.settings.SettingsScreen
 
 /** Largeur Material 3 « expanded », adaptée à deux volets réellement lisibles. */
@@ -86,7 +89,9 @@ internal fun resolveSelectedCityId(
  */
 @Composable
 fun AppNavHost() {
-    AppToastLayer {
+    AppToastLayer(
+        modifier = Modifier.semantics { testTagsAsResourceId = true }
+    ) {
         AdaptiveNavigationContent(
             phoneContent = { PhoneAppNavHost() },
             tabletContent = { TabletAppNavHost() },
@@ -125,6 +130,9 @@ private fun PhoneAppNavHost() {
                 },
                 onGraphicViewClick = { cityId ->
                     navController.navigate(Destinations.graphicView(cityId))
+                },
+                onRadarClick = { cityId ->
+                    navController.navigate(Destinations.radar(cityId))
                 },
                 onSettingsClick = {
                     navController.navigate(Destinations.SETTINGS)
@@ -179,8 +187,10 @@ private fun TabletHomeScreen(
 ) {
     val listState by cityListViewModel.uiState.collectAsStateWithLifecycle()
     val availableCityIds = listState.items.map { it.city.id }
-    var directGraphicCityId by rememberSaveable { mutableStateOf<String?>(null) }
-    var directGraphicRequest by rememberSaveable { mutableStateOf(0) }
+    var directCityId by rememberSaveable { mutableStateOf<String?>(null) }
+    var directDestination by rememberSaveable { mutableStateOf<String?>(null) }
+    var directRequest by rememberSaveable { mutableStateOf(0) }
+    var handledDirectRequest by rememberSaveable { mutableStateOf(0) }
 
     TabletMasterDetailContent(
         availableCityIds = availableCityIds,
@@ -189,8 +199,15 @@ private fun TabletHomeScreen(
                 onCityClick = onCityClick,
                 onGraphicViewClick = { cityId ->
                     onCityClick(cityId)
-                    directGraphicCityId = cityId
-                    directGraphicRequest += 1
+                    directCityId = cityId
+                    directDestination = Destinations.GRAPHIC_VIEW
+                    directRequest += 1
+                },
+                onRadarClick = { cityId ->
+                    onCityClick(cityId)
+                    directCityId = cityId
+                    directDestination = Destinations.RADAR
+                    directRequest += 1
                 },
                 onSettingsClick = onSettingsClick,
                 onHelpClick = onHelpClick,
@@ -203,10 +220,19 @@ private fun TabletHomeScreen(
             // Chaque localité possède ainsi une pile de navigation et un
             // CityDetailViewModel ne contenant que son cityId.
             key(cityId) {
+                val pendingRequest = pendingDirectDetailRequest(
+                    request = directRequest,
+                    handledRequest = handledDirectRequest,
+                    requestCityId = directCityId,
+                    activeCityId = cityId
+                )
                 TabletDetailNavHost(
                     cityId = cityId,
-                    directGraphicRequest = directGraphicRequest
-                        .takeIf { directGraphicCityId == cityId && it > 0 }
+                    directRequest = pendingRequest,
+                    directDestination = directDestination.takeIf { pendingRequest != null },
+                    onDirectRequestConsumed = { token ->
+                        if (token > handledDirectRequest) handledDirectRequest = token
+                    }
                 )
             }
         },
@@ -278,16 +304,22 @@ internal fun TabletMasterDetailContent(
 @Composable
 private fun TabletDetailNavHost(
     cityId: String,
-    directGraphicRequest: Int? = null
+    directRequest: Int? = null,
+    directDestination: String? = null,
+    onDirectRequestConsumed: (Int) -> Unit = {}
 ) {
     val navController = rememberNavController()
 
-    LaunchedEffect(directGraphicRequest) {
-        if (directGraphicRequest != null &&
-            navController.currentDestination?.route != Destinations.GRAPHIC_VIEW
-        ) {
-            navController.navigate(Destinations.graphicView(cityId))
+    LaunchedEffect(directRequest, directDestination) {
+        val token = directRequest ?: return@LaunchedEffect
+        val route = directDetailRoute(directDestination, cityId)
+        if (route != null && navController.currentDestination?.route != directDestination) {
+            navController.navigate(route)
         }
+        // Une action directe depuis la carte Home est un événement one-shot.
+        // La marquer consommée empêche sa réouverture si la même ville est
+        // sélectionnée normalement plus tard ou après une recréation d'écran.
+        onDirectRequestConsumed(token)
     }
 
     NavHost(
@@ -301,6 +333,21 @@ private fun TabletDetailNavHost(
             initialCityId = cityId
         )
     }
+}
+
+internal fun directDetailRoute(destination: String?, cityId: String): String? = when (destination) {
+    Destinations.GRAPHIC_VIEW -> Destinations.graphicView(cityId)
+    Destinations.RADAR -> Destinations.radar(cityId)
+    else -> null
+}
+
+internal fun pendingDirectDetailRequest(
+    request: Int,
+    handledRequest: Int,
+    requestCityId: String?,
+    activeCityId: String
+): Int? = request.takeIf {
+    requestCityId == activeCityId && request > handledRequest
 }
 
 @Composable
@@ -389,6 +436,9 @@ private fun NavGraphBuilder.detailDestinations(
             },
             onGraphicViewClick = {
                 navController.navigate(Destinations.graphicView(cityId))
+            },
+            onRadarClick = {
+                navController.navigate(Destinations.radar(cityId))
             }
         )
     }
@@ -400,6 +450,15 @@ private fun NavGraphBuilder.detailDestinations(
         })
     ) {
         EngineComparisonScreen(onBack = { navController.popBackStack() })
+    }
+
+    composable(
+        route = Destinations.RADAR,
+        arguments = listOf(navArgument(Destinations.CITY_DETAIL_ARG) {
+            type = NavType.StringType
+        })
+    ) {
+        RadarScreen(onBack = { navController.popBackStack() })
     }
 
     composable(
