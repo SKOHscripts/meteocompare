@@ -12,6 +12,7 @@ import com.meteocompare.app.data.local.ForecastCacheDao
 import com.meteocompare.app.data.local.ForecastCacheEntity
 import com.meteocompare.app.data.mapper.ForecastMapper
 import com.meteocompare.app.data.remote.BatchedForecastSplitter
+import com.meteocompare.app.data.remote.EnsembleApi
 import com.meteocompare.app.data.remote.OpenMeteoApi
 import com.meteocompare.app.data.remote.dto.ForecastResponseDto
 import com.meteocompare.app.di.DefaultDispatcher
@@ -19,6 +20,7 @@ import com.meteocompare.app.di.IoDispatcher
 import com.meteocompare.app.domain.model.City
 import com.meteocompare.app.domain.model.CityForecast
 import com.meteocompare.app.domain.model.Coverage
+import com.meteocompare.app.domain.model.ForecastEndpoint
 import com.meteocompare.app.domain.model.ForecastSeries
 import com.meteocompare.app.domain.model.WeatherModel
 import com.meteocompare.app.domain.repository.ForecastRepository
@@ -37,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -84,6 +87,7 @@ import retrofit2.HttpException
 @Singleton
 class ForecastRepositoryImpl @Inject constructor(
     private val api: OpenMeteoApi,
+    private val ensembleApi: EnsembleApi,
     private val mapper: ForecastMapper,
     private val cacheDao: ForecastCacheDao,
     private val json: Json,
@@ -479,6 +483,14 @@ class ForecastRepositoryImpl @Inject constructor(
      * indistinguables dans une réponse partielle. [CityForecast.errors] reste
      * donc volontairement neutre et l'UI peut griser le modèle plutôt que
      * l'interpréter comme une conclusion géographique.
+     *
+     * ─── Plusieurs endpoints ─────────────────────────────────────────────
+     * Les modèles publiés uniquement en ensemble ([ForecastEndpoint.ENSEMBLE])
+     * sont servis par un autre hôte : leur lot part en parallèle de celui de
+     * la Forecast API, qui garde seul le retry global. Sans modèle d'ensemble,
+     * le comportement est strictement celui d'un endpoint unique. L'échec d'un
+     * seul endpoint n'invalide pas les modèles de l'autre : ses modèles portent
+     * l'erreur et leurs anciennes lignes de cache sont conservées telles quelles.
      */
     private suspend fun fetchAndCache(
         city: City,
@@ -503,84 +515,52 @@ class ForecastRepositoryImpl @Inject constructor(
 
         val now = clock.millis()
 
-        // ── Requête batched résiliente ────────────────────────────────
-        //
-        // Open-Meteo accepte une liste mêlant modèles globaux et régionaux,
-        // mais un modèle régional hors de son domaine peut parfois faire
-        // échouer ou vider tout le lot. On tente d'abord EXACTEMENT la
-        // sélection de l'utilisateur ; uniquement en cas d'échec complet,
-        // on retente les modèles globaux déjà présents dans sa sélection.
-        //
-        // Cette stratégie ne modifie donc jamais silencieusement les choix
-        // utilisateur : elle retire seulement, pour ce retry, les modèles
-        // régionaux qui empêchent potentiellement une ville hors zone de
-        // recevoir les prévisions globales pourtant sélectionnées.
-        val primaryAttempt = requestBatchAttempt(
-            city = city,
-            models = models,
-            forecastDays = forecastDays,
-            fetchedAtEpochMs = now
-        )
-        val primary = primaryAttempt.getOrNull()
-        val globalFallbackModels = models.filter { it.coverage == Coverage.GLOBAL }
-        val canRetryGlobalOnly =
-            globalFallbackModels.isNotEmpty() && globalFallbackModels.size < models.size
+        val forecastModels = models.filter { it.endpoint == ForecastEndpoint.FORECAST }
+        val ensembleModels = models.filter { it.endpoint == ForecastEndpoint.ENSEMBLE }
 
-        val selectedAttempt = if (primary?.processed?.series?.isNotEmpty() == true) {
-            primary
-        } else if (canRetryGlobalOnly) {
-            if (BuildConfig.DEBUG) {
-                android.util.Log.w(
-                    LOG_TAG,
-                    "Full model batch unavailable for ${city.id}; retrying " +
-                        "${globalFallbackModels.size} global model(s): " +
-                        globalFallbackModels.joinToString(",") { it.apiKey },
-                    primaryAttempt.exceptionOrNull()
-                )
+        // Les deux lots partent en parallèle. La Forecast API passe en premier
+        // dans `outcomes` : son erreur prime si aucun lot n'est exploitable.
+        val outcomes = coroutineScope {
+            val forecast = async {
+                if (forecastModels.isEmpty()) null
+                else fetchForecastModels(city, forecastModels, forecastDays, now)
             }
-            requestBatchAttempt(
-                city = city,
-                models = globalFallbackModels,
-                forecastDays = forecastDays,
-                fetchedAtEpochMs = now
-            ).getOrElse { fallbackError ->
-                return@withContext ApiResult.Error(
-                    fallbackError,
-                    if (fallbackError.isUnsupportedLocationResponse()) {
-                        unsupportedLocationMessage(models)
-                    } else {
-                        fallbackError.toUserMessage(context)
-                    }
-                )
+            val ensemble = async {
+                if (ensembleModels.isEmpty()) null
+                else fetchEnsembleModels(city, ensembleModels, forecastDays, now)
             }
-        } else {
-            val error = primaryAttempt.exceptionOrNull()
-                ?: IllegalStateException("No usable model in batched response")
-            return@withContext ApiResult.Error(
-                error,
-                if (primaryAttempt.isFailure) {
-                    if (error.isUnsupportedLocationResponse()) {
-                        unsupportedLocationMessage(models)
-                    } else {
-                        error.toUserMessage(context)
-                    }
-                } else {
-                    context.getString(R.string.error_no_model_available)
-                }
-            )
+            listOfNotNull(forecast.await(), ensemble.await())
+        }
+        val answered = outcomes.filterIsInstance<EndpointOutcome.Answered>()
+        if (answered.isEmpty()) {
+            val failure = outcomes.filterIsInstance<EndpointOutcome.Failed>().first()
+            return@withContext ApiResult.Error(failure.error, failure.message)
         }
 
-        val batched = selectedAttempt.response
-        val processed = selectedAttempt.processed
-        val perModelDtos = processed.dtos
-        val successes = processed.series
-        val cacheEntries = processed.cacheEntries
+        val perModelDtos = LinkedHashMap<WeatherModel, ForecastResponseDto>()
+        val successes = LinkedHashMap<WeatherModel, ForecastSeries>()
+        val cacheEntries = mutableListOf<ForecastCacheEntity>()
+        answered.forEach { outcome ->
+            perModelDtos += outcome.attempt.processed.dtos
+            successes += outcome.attempt.processed.series
+            cacheEntries += outcome.attempt.processed.cacheEntries
+        }
         val errors = mutableMapOf<WeatherModel, String>()
+
+        // Modèles d'un endpoint en échec alors que l'autre a répondu : l'erreur
+        // est connue et n'est PAS une absence de données. Ils ne reçoivent donc
+        // pas de marqueur d'indisponibilité et leurs anciennes lignes restent en cache.
+        outcomes.filterIsInstance<EndpointOutcome.Failed>().forEach { failed ->
+            failed.models.forEach { model -> errors[model] = failed.message }
+        }
 
         // Modèles demandés mais absents du split → données inexploitables.
         // La réponse ne permet pas de distinguer hors couverture, horizon
         // absent et incident ponctuel : le message utilisateur reste neutre.
-        val missingModels = models - perModelDtos.keys
+        // Après un retry global, les modèles régionaux retirés du lot en font
+        // partie, comme avec un endpoint unique.
+        val answeredModels = answered.flatMap(EndpointOutcome::models)
+        val missingModels = answeredModels - perModelDtos.keys
         for (model in missingModels) {
             errors[model] = context.getString(R.string.error_model_out_of_range)
         }
@@ -610,8 +590,9 @@ class ForecastRepositoryImpl @Inject constructor(
                     // Inclut les anciennes clés reconnues afin qu'un
                     // refresh migre naturellement le cache vers la clé
                     // canonique et ne laisse pas deux lignes pour un même
-                    // modèle logique.
-                    requestedModelKeys = models
+                    // modèle logique. Seuls les modèles des endpoints qui
+                    // ont répondu sont remplacés.
+                    requestedModelKeys = answeredModels
                         .flatMap { it.compatibleApiKeys }
                         .distinct(),
                     entities = persistedEntries,
@@ -636,7 +617,7 @@ class ForecastRepositoryImpl @Inject constructor(
             )
         } else {
             val fresh = CityForecast(
-                city = city.withApiTimezoneFallback(batched.timezone),
+                city = city.withApiTimezoneFallback(answered.first().attempt.response.timezone),
                 seriesByModel = successes,
                 errors = errors,
                 fetchedAt = Instant.ofEpochMilli(now)
@@ -652,6 +633,138 @@ class ForecastRepositoryImpl @Inject constructor(
 
             ApiResult.Success(fresh)
         }
+    }
+
+    /**
+     * Lot de la Forecast API, résilient hors couverture.
+     *
+     * Open-Meteo accepte une liste mêlant modèles globaux et régionaux, mais
+     * un modèle régional hors de son domaine peut parfois faire échouer ou
+     * vider tout le lot. On tente d'abord EXACTEMENT la sélection de
+     * l'utilisateur ; uniquement en cas d'échec complet, on retente les
+     * modèles globaux déjà présents dans sa sélection.
+     *
+     * Cette stratégie ne modifie donc jamais silencieusement les choix
+     * utilisateur : elle retire seulement, pour ce retry, les modèles
+     * régionaux qui empêchent potentiellement une ville hors zone de recevoir
+     * les prévisions globales pourtant sélectionnées.
+     */
+    private suspend fun fetchForecastModels(
+        city: City,
+        models: List<WeatherModel>,
+        forecastDays: Int,
+        fetchedAtEpochMs: Long
+    ): EndpointOutcome {
+        val primaryAttempt = requestBatchAttempt(
+            city = city,
+            models = models,
+            forecastDays = forecastDays,
+            fetchedAtEpochMs = fetchedAtEpochMs,
+            endpoint = ForecastEndpoint.FORECAST
+        )
+        val primary = primaryAttempt.getOrNull()
+        val globalFallbackModels = models.filter { it.coverage == Coverage.GLOBAL }
+        val canRetryGlobalOnly =
+            globalFallbackModels.isNotEmpty() && globalFallbackModels.size < models.size
+
+        if (primary?.processed?.series?.isNotEmpty() == true) {
+            return EndpointOutcome.Answered(models, primary)
+        }
+        if (canRetryGlobalOnly) {
+            if (BuildConfig.DEBUG) {
+                android.util.Log.w(
+                    LOG_TAG,
+                    "Full model batch unavailable for ${city.id}; retrying " +
+                        "${globalFallbackModels.size} global model(s): " +
+                        globalFallbackModels.joinToString(",") { it.apiKey },
+                    primaryAttempt.exceptionOrNull()
+                )
+            }
+            return requestBatchAttempt(
+                city = city,
+                models = globalFallbackModels,
+                forecastDays = forecastDays,
+                fetchedAtEpochMs = fetchedAtEpochMs,
+                endpoint = ForecastEndpoint.FORECAST
+            ).fold(
+                onSuccess = { EndpointOutcome.Answered(models, it) },
+                onFailure = { fallbackError ->
+                    EndpointOutcome.Failed(
+                        models,
+                        fallbackError,
+                        if (fallbackError.isUnsupportedLocationResponse()) {
+                            unsupportedLocationMessage(models)
+                        } else {
+                            fallbackError.toUserMessage(context)
+                        }
+                    )
+                }
+            )
+        }
+        val error = primaryAttempt.exceptionOrNull()
+            ?: IllegalStateException("No usable model in batched response")
+        return EndpointOutcome.Failed(
+            models,
+            error,
+            if (primaryAttempt.isFailure) {
+                if (error.isUnsupportedLocationResponse()) {
+                    unsupportedLocationMessage(models)
+                } else {
+                    error.toUserMessage(context)
+                }
+            } else {
+                context.getString(R.string.error_no_model_available)
+            }
+        )
+    }
+
+    /**
+     * Lot de l'Ensemble API. Ces modèles sont globaux : pas de retry, une
+     * réponse sans série exploitable est traitée comme un échec du lot.
+     */
+    private suspend fun fetchEnsembleModels(
+        city: City,
+        models: List<WeatherModel>,
+        forecastDays: Int,
+        fetchedAtEpochMs: Long
+    ): EndpointOutcome = requestBatchAttempt(
+        city = city,
+        models = models,
+        forecastDays = forecastDays,
+        fetchedAtEpochMs = fetchedAtEpochMs,
+        endpoint = ForecastEndpoint.ENSEMBLE
+    ).fold(
+        onSuccess = { attempt ->
+            if (attempt.processed.series.isNotEmpty()) {
+                EndpointOutcome.Answered(models, attempt)
+            } else {
+                EndpointOutcome.Failed(
+                    models,
+                    IllegalStateException("No usable model in ensemble response"),
+                    context.getString(R.string.error_no_model_available)
+                )
+            }
+        },
+        onFailure = { error -> EndpointOutcome.Failed(models, error, error.toUserMessage(context)) }
+    )
+
+    /** Résultat du lot d'un endpoint. */
+    private sealed interface EndpointOutcome {
+        /** Modèles demandés à cet endpoint. */
+        val models: List<WeatherModel>
+
+        /** Lot exploitable : le cache de [models] est remplacé. */
+        data class Answered(
+            override val models: List<WeatherModel>,
+            val attempt: BatchAttempt
+        ) : EndpointOutcome
+
+        /** Lot en échec : [message] est affiché, le cache de [models] est conservé. */
+        data class Failed(
+            override val models: List<WeatherModel>,
+            val error: Throwable,
+            val message: String
+        ) : EndpointOutcome
     }
 
     /**
@@ -696,24 +809,34 @@ class ForecastRepositoryImpl @Inject constructor(
         city: City,
         models: List<WeatherModel>,
         forecastDays: Int,
-        fetchedAtEpochMs: Long
+        fetchedAtEpochMs: Long,
+        endpoint: ForecastEndpoint
     ): Result<BatchAttempt> = runSuspendCatching {
         val effectiveDays = effectiveForecastDays(models, forecastDays)
 
         if (BuildConfig.DEBUG) {
             android.util.Log.d(
                 LOG_TAG,
-                "Batched fetch: ${models.size} models in 1 HTTPS request " +
+                "Batched fetch ($endpoint): ${models.size} models in 1 HTTPS request " +
                     "→ ${models.joinToString(",") { it.apiKey }}"
             )
         }
 
-        val batched = api.getForecastBatched(
-            latitude = city.latitude,
-            longitude = city.longitude,
-            models = models.joinToString(",") { it.apiKey },
-            forecastDays = effectiveDays
-        )
+        val apiModels = models.joinToString(",") { it.apiKey }
+        val batched = when (endpoint) {
+            ForecastEndpoint.FORECAST -> api.getForecastBatched(
+                latitude = city.latitude,
+                longitude = city.longitude,
+                models = apiModels,
+                forecastDays = effectiveDays
+            )
+            ForecastEndpoint.ENSEMBLE -> ensembleApi.getEnsembleBatched(
+                latitude = city.latitude,
+                longitude = city.longitude,
+                models = apiModels,
+                forecastDays = effectiveDays
+            )
+        }
 
         val processed = withContext(computationDispatcher) {
             val perModelDtos = BatchedForecastSplitter.split(batched, models)
