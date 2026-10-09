@@ -1,0 +1,72 @@
+# Synchronisation du master du fork sur celui de l'auteur, propre au fork.
+#
+# master est un miroir strict de Pat0chat/meteocompare : aucun commit du fork
+# n'y est ajouté, si bien que la mise à jour est toujours une avance rapide
+# (fast-forward). Les fichiers propres au fork (workflows de test, clé de
+# test) vivent sur release/all-fixes, la branche par défaut du fork : c'est
+# elle qui porte ce workflow, car GitHub ne lance les workflows planifiés et
+# manuels que depuis la branche par défaut.
+#
+# Si master a divergé (commit poussé directement dessus), le run échoue au
+# lieu d'écraser quoi que ce soit : déplacer ces commits sur une autre
+# branche, puis remettre master sur l'upstream.
+#
+# Le GITHUB_TOKEN ne peut pas pousser un commit qui modifie un fichier de
+# .github/workflows/. Quand l'auteur en modifie un, le push échoue tant que
+# le secret FORK_SYNC_TOKEN n'existe pas : un token « fine-grained » limité
+# à ce dépôt, avec les permissions Contents et Workflows en écriture.
+name: Sync master (upstream)
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'SKOHscripts/meteocompare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      UPSTREAM: https://github.com/Pat0chat/meteocompare.git
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+
+      - name: Avancer master sur l'upstream
+        shell: bash
+        run: |
+          git fetch --no-tags "$UPSTREAM" master
+          upstream="$(git rev-parse FETCH_HEAD)"
+          local="$(git rev-parse HEAD)"
+          echo "master du fork : $local"
+          echo "master upstream : $upstream"
+
+          if [ "$local" = "$upstream" ]; then
+            echo "Déjà à jour."
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "$local" "$upstream"; then
+            echo "::error::master a divergé de l'upstream. Commits propres au fork :"
+            git log --oneline "$upstream..$local"
+            exit 1
+          fi
+
+          git log --oneline "$local..$upstream"
+          if ! git push origin "$upstream:refs/heads/master"; then
+            if [ -n "$(git diff --name-only "$local" "$upstream" -- .github/workflows/)" ]; then
+              echo "::error::L'upstream modifie un workflow : ajouter le secret FORK_SYNC_TOKEN (Contents + Workflows en écriture)."
+            fi
+            exit 1
+          fi

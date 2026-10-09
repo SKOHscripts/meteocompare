@@ -1,7 +1,8 @@
 # Build manuel d'un APK de test, propre au fork.
 #
 # Actions → « APK de test (manuel) » → Run workflow : garder « Use workflow
-# from » sur master, puis saisir la branche du fork à compiler. L'APK debug
+# from » sur release/all-fixes (branche par défaut du fork), puis saisir la
+# branche du fork à compiler. L'APK debug
 # (paquet com.meteocompare.app.debug) est signé avec la clé de test du fork,
 # injectée au moment du build : la branche compilée n'a besoin ni du
 # keystore ni de modification Gradle, et l'APK met à jour l'app de test déjà
@@ -9,9 +10,9 @@
 #
 # Résultat : l'APK et son empreinte SHA-256 en artefact du run, sans release.
 #
-# Ce fichier et .github/test-signing/ n'existent que sur le fork : les
-# branches proposées en PR partent du master de l'auteur et ne les
-# contiennent pas.
+# Ce fichier et .github/test-signing/ n'existent que sur les branches de test
+# du fork, jamais sur master (miroir strict de l'auteur, cf. sync-upstream.yml) :
+# les branches proposées en PR partent de master et ne les contiennent pas.
 name: APK de test (manuel)
 run-name: APK ${{ inputs.branche }}
 
@@ -42,8 +43,8 @@ jobs:
         with:
           ref: ${{ inputs.branche }}
 
-      # La clé de test vient du commit qui porte ce workflow (master du fork),
-      # pas de la branche compilée.
+      # La clé de test vient du commit qui porte ce workflow (branche par
+      # défaut du fork), pas de la branche compilée.
       - name: Récupérer la clé de test
         uses: actions/checkout@v4
         with:
