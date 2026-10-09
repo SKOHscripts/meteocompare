@@ -3,7 +3,7 @@
 `meteocompare-test.jks` signe les APK **debug** (paquet `com.meteocompare.app.debug`)
 produits par les workflows du fork :
 
-- `APK de test (manuel)` (`build-apk.yml`, sur `master`) : bouton « Run workflow »,
+- `APK de test (manuel)` (`build-apk.yml`, sur `release/all-fixes`) : bouton « Run workflow »,
   n'importe quelle branche du fork, APK en artefact. La clé est injectée au build
   (`android.injected.signing.*`), sans modifier la branche compilée.
 - `Release de test (fork)` (`release-apk.yml`, sur `release/all-fixes`) :
